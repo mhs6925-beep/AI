@@ -2,7 +2,7 @@
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PAT 삼각형 영상 평가 v12.8</title>
+<title>PAT 삼각형 영상 평가 v12.9</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* 레이아웃: 단일 컬럼 단계형(①~⑦) 도구 페이지, 폰 우선 */
@@ -68,19 +68,33 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
 .min0{min-width:0;}
 *{box-sizing:border-box} body{margin:0} [hidden]{display:none!important} .decodeSource{position:absolute;width:1px;height:1px;opacity:.01;pointer-events:none} #liveStatus,#autoStatus{overflow-wrap:anywhere} section.step{min-width:0} #coBody{overflow-x:auto;max-width:100%} a{color:var(--accent)}
 .tri{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
-.pat{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--card);margin-top:12px}
+.pat{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--card);margin-top:10px}
 .patHead{font-weight:700;font-size:1.02rem;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.patRow{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
-.patName{font-weight:700}
-.patAuto{font-size:.86rem;line-height:1.4;overflow-wrap:anywhere}
-.patAuto small{color:var(--muted)}
-.patObs{display:flex;gap:4px}
-.patObs button{font-size:.78rem;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--fg)}
-.patObs button.on-normal{background:var(--ok-weak,rgba(60,160,90,.18));border-color:var(--ok,#3a9d5d)}
-.patObs button.on-abnormal{background:var(--bad-weak);border-color:var(--bad);color:var(--bad)}
-.patObs button.on-unknown{background:var(--accent-weak)}
+.patTiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.patTile{border:1px solid var(--line);border-top:5px solid var(--muted);border-radius:10px;padding:8px;min-width:0;background:var(--bg)}
+.patTile.q-good{border-top-color:#2f9e5f}.patTile.q-mid{border-top-color:#d99a1f}.patTile.q-low{border-top-color:var(--bad)}.patTile.q-none{border-top-color:var(--muted)}
+.patAxis{font-size:.8rem;color:var(--muted);font-weight:700}
+.patVal{font-size:1.3rem;font-weight:800;line-height:1.15;margin:3px 0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.patVal small{font-size:.74rem;font-weight:600;color:var(--muted)}
+.patQ{font-size:.74rem;font-weight:700;margin-bottom:4px}
+.patQ.q-good{color:#2f9e5f}.patQ.q-mid{color:#d99a1f}.patQ.q-low{color:var(--bad)}.patQ.q-none{color:var(--muted)}
+.patAuto{font-size:.76rem;line-height:1.35;color:var(--muted);overflow-wrap:anywhere;min-height:1.2em}
+.patObs{display:flex;gap:4px;margin-top:6px}
+.patObs button{flex:1;font-size:.78rem;padding:6px 2px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--fg);min-width:0;white-space:nowrap}
+.patObs button.on-normal{background:rgba(47,158,95,.18);border-color:#2f9e5f;font-weight:700}
+.patObs button.on-abnormal{background:var(--bad-weak);border-color:var(--bad);color:var(--bad);font-weight:700}
+.patObs button.on-unknown{background:var(--accent-weak);font-weight:700}
 .patSum{margin-top:10px;padding:10px;border-radius:10px;background:var(--accent-weak);font-size:.92rem;line-height:1.5}
-@media(max-width:560px){.patRow{grid-template-columns:48px minmax(0,1fr)}.patObs{grid-column:1/-1}}
+@media(max-width:560px){
+  .patTiles{grid-template-columns:1fr;gap:6px}
+  .patTile{border-top-width:1px;border-top-color:var(--line)!important;border-left:6px solid var(--muted);display:grid;grid-template-columns:44px minmax(0,1fr);grid-template-areas:"axis val" "axis q" "sub sub" "obs obs";column-gap:8px;align-items:center;padding:8px 10px}
+  .patTile.q-good{border-left-color:#2f9e5f}.patTile.q-mid{border-left-color:#d99a1f}.patTile.q-low{border-left-color:var(--bad)}.patTile.q-none{border-left-color:var(--muted)}
+  .patAxis{grid-area:axis;font-size:.95rem;color:var(--fg);align-self:start;padding-top:2px}
+  .patVal{grid-area:val;font-size:1.25rem;margin:0}
+  .patQ{grid-area:q;margin:0}
+  .patAuto{grid-area:sub;margin-top:4px}
+  .patObs{grid-area:obs;margin-top:6px}
+}
 @media(max-width:560px){.tri{grid-template-columns:1fr}}
 .tcard{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--card);min-width:0}
 .tname{font-size:.82rem;color:var(--muted);font-weight:600}
@@ -101,7 +115,7 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
 
 <main>
   <header>
-    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.8 · 연구용</span></h1>
+    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.9 · 연구용</span></h1>
     <p class="sub">휴대폰 한 대로 소아평가삼각형(PAT)의 세 축 — 호흡·외관·피부순환 — 을 객관적 수치로 기록합니다. 손에 들고 한 번 촬영하면 얼굴·몸을 자동으로 따라가며 측정합니다. 측정값만 제공하며 정상/이상 판정은 하지 않습니다.</p>
   </header>
 
@@ -120,20 +134,28 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
     </div>
     <div id="demoBanner" class="reason" hidden></div>
     <canvas id="liveView" hidden aria-label="실시간 추적 화면"></canvas>
+    <div id="patBoard" class="pat" hidden>
+      <div class="patHead">PAT 한눈에 <span class="badge bad">자동 측정값 + 측정 품질 + 평가자 관찰 — 결론은 평가자가</span></div>
+      <div class="patTiles">
+        <div class="patTile q-none" id="pat_tile_appearance"><div class="patAxis">외관</div><div class="patVal" id="pat_val_appearance">—</div><div class="patQ" id="pat_q_appearance">측정 전</div><div class="patAuto" id="pat_auto_appearance"></div>
+          <div class="patObs" data-axis="appearance"><button data-v="normal">정상</button><button data-v="abnormal">이상</button><button data-v="unknown">미확인</button></div></div>
+        <div class="patTile q-none" id="pat_tile_breathing"><div class="patAxis">호흡</div><div class="patVal" id="pat_val_breathing">—</div><div class="patQ" id="pat_q_breathing">측정 전</div><div class="patAuto" id="pat_auto_breathing"></div>
+          <div class="patObs" data-axis="breathing"><button data-v="normal">정상</button><button data-v="abnormal">이상</button><button data-v="unknown">미확인</button></div></div>
+        <div class="patTile q-none" id="pat_tile_circulation"><div class="patAxis">순환</div><div class="patVal" id="pat_val_circulation">—</div><div class="patQ" id="pat_q_circulation">측정 전</div><div class="patAuto" id="pat_auto_circulation"></div>
+          <div class="patObs" data-axis="circulation"><button data-v="normal">정상</button><button data-v="abnormal">이상</button><button data-v="unknown">미확인</button></div></div>
+      </div>
+      <div class="patSum" id="patSum">—</div>
+      <div class="row" style="margin-top:8px;align-items:center">
+        <label for="patAge">연령(개월)</label><input type="number" id="patAge" min="0" max="240" inputmode="numeric" placeholder="미입력" style="width:88px">
+        <label for="patImpression">평가자 PAT 인상</label>
+        <select id="patImpression"><option value="">미선택</option><option>안정</option><option>호흡곤란</option><option>호흡부전</option><option>보상성 쇼크</option><option>비보상성 쇼크</option><option>중추신경계·대사 이상</option><option>심폐부전</option></select>
+      </div>
+      <p class="note">정상/이상은 평가자가 직접 본 것을 누릅니다 — 외관(TICLS: 근긴장·반응·달램·시선·말/울음), 호흡노력(이상 호흡음·자세·견인·콧벌렁), 순환(창백·얼룩·청색증). 색 테두리는 <b>측정 품질</b>(좋음·보통·낮음)이지 환자 상태가 아닙니다. 어느 축도 자동으로 '이상'이라 판정하지 않으며, 관찰·인상은 CSV에 측정값과 구분해 저장됩니다.</p>
+    </div>
     <div class="tri" id="triPanel">
       <div class="tcard"><div class="tname">호흡 (Work of Breathing)</div><div class="tbig">—</div><div class="tsub">호흡수 · 사용 구간 · 카메라 움직임</div></div>
       <div class="tcard"><div class="tname">외관 (Appearance)</div><div class="tbig">—</div><div class="tsub">눈 뜸 · 시선 · 표정 계수 · 몸 움직임</div></div>
       <div class="tcard"><div class="tname">피부순환 (Circulation)</div><div class="tbig">—</div><div class="tsub">색 자료 수집 · 창백·얼룩·청색증 판정 미지원</div></div>
-    </div>
-    <div id="patBoard" class="pat" hidden>
-      <div class="patHead">PAT 요약판 <span class="badge bad">자동 측정값 + 평가자 관찰 — 결론은 평가자가</span></div>
-      <div class="patRow" data-axis="appearance"><div class="patName">외관</div><div class="patAuto" id="pat_auto_appearance">—</div><div class="patObs" data-axis="appearance"><button data-v="normal">정상</button><button data-v="abnormal">이상</button><button data-v="unknown">미확인</button></div></div>
-      <div class="patRow" data-axis="breathing"><div class="patName">호흡</div><div class="patAuto" id="pat_auto_breathing">—</div><div class="patObs" data-axis="breathing"><button data-v="normal">정상</button><button data-v="abnormal">이상</button><button data-v="unknown">미확인</button></div></div>
-      <div class="patRow" data-axis="circulation"><div class="patName">순환</div><div class="patAuto" id="pat_auto_circulation">—</div><div class="patObs" data-axis="circulation"><button data-v="normal">정상</button><button data-v="abnormal">이상</button><button data-v="unknown">미확인</button></div></div>
-      <div class="patSum" id="patSum">—</div>
-      <div class="row" style="margin-top:8px"><label for="patImpression">평가자 PAT 인상</label>
-        <select id="patImpression"><option value="">미선택</option><option>안정</option><option>호흡곤란</option><option>호흡부전</option><option>보상성 쇼크</option><option>비보상성 쇼크</option><option>중추신경계·대사 이상</option><option>심폐부전</option></select></div>
-      <p class="note">외관(TICLS: 근긴장·반응·달램·시선·말/울음), 호흡노력(이상 호흡음·자세·견인·콧벌렁), 순환(창백·얼룩·청색증)은 평가자가 보고 누릅니다. 자동 측정값은 참고용 숫자이며 어느 축도 자동으로 '이상'이라 판정하지 않습니다. 관찰과 인상은 CSV에 측정값과 구분해 저장됩니다.</p>
     </div>
     <div id="skinLive" hidden aria-live="polite">
     <div class="skinGrid"><div class="skinTile"><h3><span id="skin_lip_swatch" class="skinSwatch"></span>입술</h3>
@@ -2472,7 +2494,7 @@ function leaveCamera(reason){
   sourceButtons(false); $('btnRun').disabled=true; $('btnAgain').hidden=true;
   if(reason) $('liveStatus').textContent=reason;
 }
-$('liveStatus').textContent='v12.8 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
+$('liveStatus').textContent='v12.9 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
 $('btnLive').addEventListener('click',openCamera);
 window.addEventListener('unhandledrejection',function(e){$('liveStatus').textContent='실행 오류: '+(e.reason&&e.reason.message||e.reason);});
 function cameraTimeout(p,ms,message){var timer;return Promise.race([p,new Promise(function(_,reject){timer=setTimeout(function(){reject(new Error(message));},ms);})]).finally(function(){clearTimeout(timer);});}
@@ -2870,28 +2892,52 @@ function patAutoFacts(run){
   f.circulation.judgement='unsupported';
   return f;
 }
+function patQuality(run){
+  // 측정 품질(환자 상태 아님): 좋음 good / 보통 mid / 낮음 low / 없음 none
+  var R=run&&run.respRes, Ap=run&&run.appearRes, C=(run&&run.colorRes)||{}, M=run&&run.motionRes, q={};
+  if(Ap&&Ap.status==='ok'){ q.appearance=Ap.faceRatio>=0.8?'good':Ap.faceRatio>=0.5?'mid':'low'; } else q.appearance='none';
+  if(R&&R.status==='ok'){ q.breathing=(!R.lowConfidence&&(R.acfPeak==null||R.acfPeak>=0.5)&&R.windowT0==null)?'good':(!R.lowConfidence?'mid':'low'); } else q.breathing='none';
+  var vr=function(k){ var r=C[k]; return r&&r.validRatio!=null?r.validRatio:(r&&r.status==='ok'?0.6:0); };
+  var lipOk=C.lip&&(C.lip.status==='ok'), chOk=C.cheek&&(C.cheek.status==='ok');
+  q.circulation=(lipOk&&chOk&&vr('lip')>=0.6&&vr('cheek')>=0.6)?'good':((lipOk||chOk)?'mid':((C.lip||C.cheek)?'low':'none'));
+  return q;
+}
+var Q_TXT={good:'측정 품질 좋음',mid:'측정 품질 보통',low:'측정 품질 낮음',none:'측정 없음'};
 function renderPatBoard(run){
   var board=$('patBoard'); if(!board) return; if(!run){ board.hidden=true; return; }
   board.hidden=false;
-  var f=patAutoFacts(run), pct=function(x){return x==null?'—':Math.round(x*100)+'%';};
-  var a=f.appearance, ap=a.unavailable?('<small>'+a.unavailable+'</small>'):('얼굴 '+pct(a.faceRatio)+' · 눈 뜸 '+pct(a.eyeOpenRatio)+' · 시선 중앙 '+pct(a.gazeCenterRatio)+(a.motionMean!=null?' · 움직임 '+a.motionMean.toFixed(0)+' %/s':''));
-  $('pat_auto_appearance').innerHTML=ap;
-  var b=f.breathing, whoTxt={above:'WHO 참고 기준 이상',below:'WHO 참고 기준 미만(정상 아님)',held:'기준 비교 보류','unsupported-age':'연령 입력 시 기준 비교',unavailable:'기준 비교 불가'};
-  $('pat_auto_breathing').innerHTML=b.unavailable?('<small>측정 불가: '+b.unavailable.slice(0,70)+'</small>'):('<b>'+b.bpm.toFixed(0)+' 회/분</b>'+(b.lowConfidence?' <small>(움직임 중 · 신뢰 낮음)</small>':'')+(b.window?' <small>'+b.window[0].toFixed(0)+'~'+b.window[1].toFixed(0)+'초</small>':'')+'<br><small>'+(whoTxt[b.who]||'연령 입력 시 기준 비교')+(b.whoThreshold!=null?' (≥'+b.whoThreshold+')':'')+'</small>');
+  var f=patAutoFacts(run), q=patQuality(run), R=run.respRes, Ap=run.appearRes, M=run.motionRes, C=run.colorRes||{}, I=run.interp;
+  var pct=function(x){return x==null?'—':Math.round(x*100)+'%';};
+  var setTile=function(ax,val,auto){ var tile=$('pat_tile_'+ax); tile.className='patTile q-'+q[ax]; $('pat_val_'+ax).innerHTML=val; var qe=$('pat_q_'+ax); qe.className='patQ q-'+q[ax]; qe.textContent=Q_TXT[q[ax]]; $('pat_auto_'+ax).innerHTML=auto; };
+  // 외관
+  var a=f.appearance;
+  if(a.unavailable) setTile('appearance','—','<span>'+a.unavailable+'</span>');
+  else setTile('appearance','눈 뜸 '+pct(a.eyeOpenRatio),'시선 중앙 '+pct(a.gazeCenterRatio)+' · 얼굴 '+pct(a.faceRatio)+(a.motionMean!=null?' · 몸 움직임 '+a.motionMean.toFixed(0)+' %/s':'')+(a.jawOpenMean!=null?' · 입 벌림 '+a.jawOpenMean.toFixed(2):''));
+  // 호흡
+  var b=f.breathing, whoTxt={above:'WHO 참고 기준 이상',below:'WHO 참고 기준 미만(정상 아님)',held:'기준 비교 보류','unsupported-age':'연령 입력 시 WHO 기준 비교',unavailable:'기준 비교 불가'};
+  if(b.unavailable) setTile('breathing','—','측정 불가: '+b.unavailable.slice(0,90));
+  else setTile('breathing',b.bpm.toFixed(0)+' <small>회/분</small>'+(b.lowConfidence?' <small style="color:var(--bad)">신뢰 낮음</small>':''),(b.window?b.window[0].toFixed(0)+'~'+b.window[1].toFixed(0)+'초 구간':'전체 구간')+(b.signalKind==='expansion'?' · 확장형 신호':'')+(b.lowConfidence&&R&&R.motionDuringWindow!=null?' · 움직임 중('+R.motionDuringWindow.toFixed(0)+' %/s)':'')+'<br>'+(whoTxt[b.who]||'연령 입력 시 WHO 기준 비교')+(b.whoThreshold!=null?' (≥'+b.whoThreshold+'회/분)':''));
+  // 순환
   var c=f.circulation, lab=function(o){return o?('L*'+o.L+' a*'+o.a):'—';};
-  $('pat_auto_circulation').innerHTML='입술 '+lab(c.lip)+' · 뺨 '+lab(c.cheek)+'<br><small>색 자료만 기록 — 창백·얼룩·청색증 자동 판정 없음</small>';
+  var cVal=(c.lip||c.cheek)?('입술 '+lab(c.lip)):'—';
+  var cAuto='뺨 '+lab(c.cheek)+' · 색 자료만 — 창백·얼룩·청색증 자동 판정 없음'; ['lip','cheek'].forEach(function(k){ var r=C[k]; if(r&&r.status!=='ok'&&r.reason) cAuto+=' · '+(k==='lip'?'입술':'뺨')+': '+String(r.reason).slice(0,40); });
+  setTile('circulation',cVal,cAuto);
+  // 관찰 버튼 상태
   board.querySelectorAll('.patObs').forEach(function(g){ var ax=g.getAttribute('data-axis'); g.querySelectorAll('button').forEach(function(bt){ bt.className=(patObs[ax]===bt.getAttribute('data-v'))?('on-'+bt.getAttribute('data-v')):''; }); });
   $('patImpression').value=patObs.impression||'';
+  var ageV=$('ageM').value; if($('patAge').value!==ageV) $('patAge').value=ageV;
+  // 요약 3줄
   var auto=[]; if(b.who==='above') auto.push('호흡수 참고 기준 이상('+b.bpm.toFixed(0)+'회/분'+(b.lowConfidence?', 신뢰 낮음':'')+')');
   var obsAb=[], obsNo=[], obsUnk=[]; [['appearance','외관'],['breathing','호흡'],['circulation','순환']].forEach(function(p){ (patObs[p[0]]==='abnormal'?obsAb:patObs[p[0]]==='normal'?obsNo:obsUnk).push(p[1]); });
   var sum=[]; sum.push('<b>자동:</b> '+(auto.length?auto.join(' · '):'참고 기준을 넘는 자동 측정값 없음'+(b.who==='unsupported-age'?' (연령 미입력)':'')));
-  sum.push('<b>평가자 관찰:</b> '+(obsAb.length?'이상 — '+obsAb.join('·'):'이상 표시 없음')+(obsNo.length?' / 정상 — '+obsNo.join('·'):'')+(obsUnk.length?' / 미확인 — '+obsUnk.join('·'):''));
-  sum.push('<b>평가자 인상:</b> '+(patObs.impression||'미선택')+' <small>— PAT 결론은 이 세 줄을 본 평가자의 판단이며, 이 앱은 결론을 내지 않습니다</small>');
+  sum.push('<b>평가자 관찰:</b> '+(obsAb.length?'<span style="color:var(--bad);font-weight:700">이상 — '+obsAb.join('·')+'</span>':'이상 표시 없음')+(obsNo.length?' / 정상 — '+obsNo.join('·'):'')+(obsUnk.length?' / 미확인 — '+obsUnk.join('·'):''));
+  sum.push('<b>평가자 인상:</b> '+(patObs.impression?('<b>'+patObs.impression+'</b>'):'미선택')+' <small>— PAT 결론은 평가자의 판단입니다. 이 앱은 결론을 내지 않습니다.</small>');
   $('patSum').innerHTML=sum.join('<br>');
 }
 (function(){ var board=$('patBoard'); if(!board) return;
   board.querySelectorAll('.patObs button').forEach(function(bt){ bt.addEventListener('click',function(){ var ax=bt.parentNode.getAttribute('data-axis'); patObs[ax]=bt.getAttribute('data-v'); if(lastRun){ runInterpret(); renderPatBoard(lastRun); } }); });
   $('patImpression').addEventListener('change',function(){ patObs.impression=$('patImpression').value; if(lastRun){ runInterpret(); renderPatBoard(lastRun); } });
+  $('patAge').addEventListener('change',function(){ $('ageM').value=$('patAge').value; if($('patAge').value!=='') $('ageUnk').checked=false; if(lastRun){ runInterpret(); renderPatBoard(lastRun); } });
 })();
 function renderTriangle(run){
   var el=$('triPanel'); if(!el||!run) return;
@@ -3107,7 +3153,7 @@ function runInterpret(){
   buildCsv(lastRun.respRes, lastRun.motionRes, lastRun.colorRes, lastRun.records, interp, ctx);
 }
 ['ageM','ageUnk','stateSel','coughSel'].forEach(function(id){
-  $(id).addEventListener('change', function(){ if (lastRun) runInterpret(); });
+  $(id).addEventListener('change', function(){ if (lastRun) { runInterpret(); renderPatBoard(lastRun); } });
 });
 
 function renderRespInterp(R, respRes){
@@ -3452,7 +3498,7 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
       var S = interp.color[k];
       lines.push('# interpret_color_' + k + ': ' + JSON.stringify({ status: S.status, delta: S.delta, lastDE: S.lastDE, episodes: S.episodes, criteria: S.criteria, reasons: S.reasons }));
     });
-    lines.push('# pat_board(자동 측정값 + 평가자 관찰·인상; 자동 판정 없음): ' + JSON.stringify({ auto: patAutoFacts(lastRun), observed: { appearance: patObs.appearance, breathing: patObs.breathing, circulation: patObs.circulation }, impression: patObs.impression || null }));
+    lines.push('# pat_board(자동 측정값 + 측정 품질 + 평가자 관찰·인상; 자동 판정 없음): ' + JSON.stringify({ auto: patAutoFacts(lastRun), quality: patQuality(lastRun), observed: { appearance: patObs.appearance, breathing: patObs.breathing, circulation: patObs.circulation }, impression: patObs.impression || null }));
     lines.push('# interpret_summary: ' + JSON.stringify({ code: interp.summary.code, lines: interp.summary.lines, excluded: interp.summary.excluded }));
   }
   lines.push('# 색공간: sRGB(가정)->XYZ(D65)->CIELAB(D65). 촬영 조건 변화와 피부색 변화는 구분 불가');
@@ -3839,7 +3885,7 @@ $('btnSyn').addEventListener('click', async function(){
   btn.disabled = false; btn.textContent = '합성 시험 실행';
 });
 /* 시험 전용 훅(화면 동작과 무관): 자동화 시험이 측정 파이프라인을 직접 구동할 수 있게 함 */
-window.__patTest={makeMeasurement:makeMeasurement,pushMeasurement:pushMeasurement,publishMeasurement:publishMeasurement,setModels:function(m){models=m;},setTracked:function(v){trackedMode=!!v;},setSize:function(w,h){AW=w;AH=h;work.width=w;work.height=h;},getLastRun:function(){return lastRun;},getCsv:function(){return lastCsv;},setStream:function(st){stream=st;},runFaceProbe:function(){return runFaceProbeButton();},getDiagNote:function(){return cameraDiagNote;},lastCrop:function(){return liveSession&&liveSession.lastCrop||(window.__patLastSession&&window.__patLastSession.lastCrop)||null;},noteSession:function(s){window.__patLastSession=s;}};
+window.__patTest={makeMeasurement:makeMeasurement,pushMeasurement:pushMeasurement,publishMeasurement:publishMeasurement,setModels:function(m){models=m;},setTracked:function(v){trackedMode=!!v;},setSize:function(w,h){AW=w;AH=h;work.width=w;work.height=h;},getLastRun:function(){return lastRun;},getCsv:function(){return lastCsv;},setStream:function(st){stream=st;},setRun:function(r){lastRun=r;renderPatBoard(r);renderTriangle(r);},setObs:function(o){Object.assign(patObs,o);},runFaceProbe:function(){return runFaceProbeButton();},getDiagNote:function(){return cameraDiagNote;},lastCrop:function(){return liveSession&&liveSession.lastCrop||(window.__patLastSession&&window.__patLastSession.lastCrop)||null;},noteSession:function(s){window.__patLastSession=s;}};
 })();
 /*__END__*/
 </script>
