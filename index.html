@@ -2,7 +2,7 @@
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PAT 삼각형 영상 평가 v12.11</title>
+<title>PAT 삼각형 영상 평가 v12.12</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* 레이아웃: 단일 컬럼 단계형(①~⑦) 도구 페이지, 폰 우선 */
@@ -124,7 +124,7 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
 
 <main>
   <header>
-    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.11 · 연구용</span></h1>
+    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.12 · 연구용</span></h1>
     <p class="sub">휴대폰 한 대로 소아평가삼각형(PAT)의 세 축 — 호흡·외관·피부순환 — 을 객관적 수치로 기록합니다. 손에 들고 한 번 촬영하면 얼굴·몸을 자동으로 따라가며 측정합니다. 측정값만 제공하며 정상/이상 판정은 하지 않습니다.</p>
   </header>
 
@@ -736,7 +736,7 @@ function createAnalyzer(w, h, roi, userCfg) {
     const rx0 = right + gap, rx1 = Math.min(w, rx0 + sw); if (rx1 - rx0 >= 6) out.push({ x: rx0, y: win.y, w: rx1 - rx0, h: win.h });
     return out;
   }
-  let invalid = 0, lowTexture = 0, nFrames = 0, pairs = 0, noWindow = 0, reanchors = 0, winJumps = 0, gaps = 0, lastT = null;
+  let invalid = 0, lowTexture = 0, nFrames = 0, pairs = 0, noWindow = 0, reanchors = 0, winJumps = 0, gaps = 0, lastT = null, firstT = null;
   const breaks = []; // 연속성이 끊긴 시점 t (프레임 공백·ROI 소실·재고정) — 기록용
   const breakIdx = new Set(); // 경계 직후 표본의 인덱스(times 기준): finish()에서 구간 분리에 사용 — 시간 간격과 별개로 항상 적용
   let roiBreaks = 0;
@@ -750,6 +750,7 @@ function createAnalyzer(w, h, roi, userCfg) {
     // 프레임 공백(모델 준비·GC·정지 등): 공백 양쪽 프레임을 쌍으로 비교하지 않고 구간을 끊는다. 전체를 버리지 않음.
     const gapBreak = (lastT != null && t - lastT > cfg.maxGapSec);
     if (gapBreak) { markBreak(t, 'gap'); prevRoiP = null; prevWin = null; }
+    if (firstT == null) firstT = t;
     lastT = t;
     const roiNow = tracked ? (extra && extra.window) : roi;
     if (!roiNow) { if (!tracked) { hardError = 'ROI 없음'; return false; } pairs++; invalid++; noWindow++; if (prevRoiP !== null) markBreak(t, 'roi'); prevRoiP = null; prevWin = null; return true; }
@@ -834,7 +835,11 @@ function createAnalyzer(w, h, roi, userCfg) {
     // 분석 불가여도 프레임별 누적 변위와 계수기는 CSV에 남긴다(무엇을 보고 불가라 했는지 추적 가능하게)
     const fail = (reason, extra) => Object.assign({ status: 'unusable', reason, config: cfg, raw: times.length ? rawOf() : null }, counters(), extra || {});
     if (hardError) return fail(hardError);
-    if (nFrames < 3 || times.length < 3) return fail('프레임 부족');
+    // 추적 모드에서 창이 없던 프레임(자세 미검출·창 소실)이 많으면 그 사실을 사유에 적는다 — '프레임 부족'만으로는 원인을 알 수 없음
+    const noWinNote = (tracked && noWindow > 0) ? (noWindow >= 0.5 * pairs
+      ? ` — 가슴·배 창 없음: 자세 모델이 몸을 찾지 못한 프레임 ${noWindow}/${pairs} (몸통이 화면에 보이게 촬영)`
+      : ` — 창 없는 프레임 ${noWindow}/${pairs}(자세 미검출·소실)`) : '';
+    if (nFrames < 3 || times.length < 3) return fail('프레임 부족' + noWinNote);
     const totalDuration = times[times.length - 1] - times[0];
     // 프레임 공백으로 끊긴 구간 중 가장 긴 연속 구간만 사용(공백을 가로질러 보간하지 않음)
     let segNote = null, segmentsAll = null;
@@ -852,7 +857,7 @@ function createAnalyzer(w, h, roi, userCfg) {
         segNote = `연속 구간 ${segs.length}개(프레임 공백 ${gaps}회·ROI 소실/재고정 ${roiBreaks}회) — 가장 긴 ${times[0].toFixed(1)}~${times[times.length - 1].toFixed(1)}초만 사용(전체 ${totalDuration.toFixed(0)}초)`;
       }
     }
-    if (times.length < 3) return fail('프레임 부족');
+    if (times.length < 3) return fail('프레임 부족' + noWinNote);
     // 조용한 구간 우선: 프레임별 몸 움직임(1초 이동 중앙값)이 quietMotionMax 이하인 가장 긴 연속 구간이 quietMinSec 이상이면 그 구간만 분석
     let quietNote = null, movementHigh = false, motionMeanAll = null;
     {
@@ -876,12 +881,22 @@ function createAnalyzer(w, h, roi, userCfg) {
       }
     }
     const duration = times[times.length - 1] - times[0];
-    if (duration < cfg.minDurationSec) return fail(`연속 구간이 짧음 (${duration.toFixed(1)}초 < 최소 ${cfg.minDurationSec}초${gaps ? `; 프레임 공백 ${gaps}회` : ''})` + (invalid > pairs * 0.5 ? ` — 유효 쌍 ${pairs - invalid}/${pairs}${lowTexture > invalid * 0.5 ? ' (창 질감 부족)' : ''}` : ''));
+    if (duration < cfg.minDurationSec) return fail(`연속 구간이 짧음 (${duration.toFixed(1)}초 < 최소 ${cfg.minDurationSec}초${gaps ? `; 프레임 공백 ${gaps}회` : ''})` + noWinNote + (invalid - noWindow > pairs * 0.5 ? ` — 유효 쌍 ${pairs - invalid}/${pairs}${lowTexture > invalid * 0.5 ? ' (창 질감 부족)' : ''}` : ''));
 
     const validRatio = 1 - invalid / Math.max(1, pairs);
-    if (validRatio < cfg.minValidRatio) {
-      return fail(`유효 프레임 부족 (${(validRatio * 100).toFixed(0)}% < ${cfg.minValidRatio * 100}%)` +
-        (lowTexture > invalid * 0.5 ? ' — ROI 질감(명암 변화) 부족' : ''), { validRatio });
+    // 유효 비율: 고정 모드는 전체 프레임 기준. 추적 모드는 '선택된 연속 구간' 안에서 센다 — 구간 밖(몸이 안 보이던 시간)의
+    // 창 없는 프레임은 이미 구간 분리로 제외됐으므로 전체 비율로 다시 벌하지 않는다(기준값 0.7은 그대로).
+    let segValidRatio = null;
+    if (tracked) {
+      const spanAll = (firstT != null && lastT != null) ? lastT - firstT : 0; // 들어온 모든 프레임의 시간 폭(창 없는 프레임 포함)
+      const fsNominal = (nFrames > 1 && spanAll > 0) ? (nFrames - 1) / spanAll : cfg.resampleFs;
+      const expected = Math.max(1, Math.round(duration * fsNominal) + 1);
+      segValidRatio = Math.min(1, times.length / expected);
+    }
+    const ratioUsed = tracked ? segValidRatio : validRatio;
+    if (ratioUsed < cfg.minValidRatio) {
+      return fail(`유효 프레임 부족 (${(ratioUsed * 100).toFixed(0)}% < ${cfg.minValidRatio * 100}%${tracked ? `; ${times[0].toFixed(1)}~${times[times.length - 1].toFixed(1)}초 구간 기준` : ''})` +
+        (lowTexture > invalid * 0.5 ? ' — ROI 질감(명암 변화) 부족' : '') + noWinNote, { validRatio, segValidRatio });
     }
 
     // 배경(카메라) 위치 신호 — 두 신호 종류에 공통
@@ -1030,7 +1045,7 @@ function createAnalyzer(w, h, roi, userCfg) {
       peakCountBpm: chosen.peakCountBpm,
       raw: rawOf(),              // 프레임별 누적 변위(CSV용): pos=이동형, div=확장형
       usedT0: times[0], usedT1: times[times.length - 1],
-      duration, rms: chosen.rms, bgRms, validRatio, snr: chosen.snr, camCorr: chosen.camCorr, sideApplied: chosen.sideApplied, sideNoise: chosen.sideNoise,
+      duration, rms: chosen.rms, bgRms, validRatio, segValidRatio, snr: chosen.snr, camCorr: chosen.camCorr, sideApplied: chosen.sideApplied, sideNoise: chosen.sideNoise,
       waveform: chosen.waveform, waveformAlt: other ? other.waveform : null, altResult: other ? { kind: other.kind, status: other.status, bpm: other.bpm != null ? other.bpm : null, acfPeak: other.acfPeak != null ? other.acfPeak : null, reason: other.reason || null } : null,
       candidates: candSummary, quietNote, movementHigh, motionMeanAll, segments: segmentsAll,
       warnings,
@@ -1410,6 +1425,9 @@ function createCameraMotion(w, h, userCfg) {
  * 영역 추종기: 랜드마크로 얻은 영역(느린 피사체 움직임)과 카메라 변환(빠른 손떨림)을 결합해
  * 매 프레임 분석 창을 만든다. 창 = 이전 창을 카메라 변환으로 옮긴 뒤 랜드마크 영역 쪽으로 followAlpha만큼 당김.
  * 중심 거리가 창 대각선의 followReanchorFrac을 넘으면 즉시 재고정(reanchor) — 신호 연속성 끊김으로 표시.
+ * 랜드마크 없이 followLostSec(2초)까지는 카메라 변환만으로 끌고 간다(coast). 그보다 길면 창은 고정점을 잃은 것이므로
+ * 버린다(lost → window:null). 이전(v12.11까지)에는 카메라 변환이 유효한 동안 lost 창을 무기한 유지해, 몸을 한 프레임만
+ * 찾은 녹화(S25+ 2026-10-22)에서 24초 동안 확인되지 않은 창의 표본으로 호흡수 26회/분이 나왔다.
  * 반환 {window:{x,y,w,h}(정수)|null, status:'init'|'follow'|'reanchor'|'coast'|'lost'|'none', breakContinuity}
  */
 function createRoiFollower(w, h, userCfg) {
@@ -1442,7 +1460,7 @@ function createRoiFollower(w, h, userCfg) {
       lastLandT = t;
     } else if (!win) status = 'none';
     else status = (lastLandT != null && t - lastLandT > cfg.followLostSec) ? 'lost' : 'coast';
-    if (status === 'lost' && !(cam && cam.ok)) { win = null; }
+    if (status === 'lost') { win = null; } // 고정점을 잃은 창은 카메라 변환이 유효해도 유지하지 않는다
     const cw = win ? clampWin(win) : null;
     return { window: cw, status, breakContinuity, roundDy: cw ? cw.y - win.y : 0 };
   }
@@ -2561,7 +2579,7 @@ function leaveCamera(reason){
   sourceButtons(false); $('btnRun').disabled=true; $('btnAgain').hidden=true;
   if(reason) $('liveStatus').textContent=reason;
 }
-$('liveStatus').textContent='v12.11 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
+$('liveStatus').textContent='v12.12 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
 $('btnLive').addEventListener('click',openCamera);
 window.addEventListener('unhandledrejection',function(e){$('liveStatus').textContent='실행 오류: '+(e.reason&&e.reason.message||e.reason);});
 function cameraTimeout(p,ms,message){var timer;return Promise.race([p,new Promise(function(_,reject){timer=setTimeout(function(){reject(new Error(message));},ms);})]).finally(function(){clearTimeout(timer);});}
@@ -2666,14 +2684,16 @@ async function loadModels(){
       var fo=faceOpts('CPU'); fo.runningMode='IMAGE'; fo.numFaces=2;
       face=await mp.FaceLandmarker.createFromOptions(fs,fo);
       models={face:face,pose:pose,delegate:delegateUsed,faceDelegate:'CPU',primaryKey:'cpu-image',mp:mp,fs:fs,faceOpts:faceOpts,poseOpts:poseOpts,engines:{'cpu-image':face}};
-      // 다른 얼굴 엔진(진단·자동 전환용): 'gpu-video' | 'gpu-image' | 'cpu-video' — 필요할 때만 생성. 'pose-cpu'는 자세 모델 CPU 비교용.
+      // 다른 얼굴 엔진(진단·자동 전환용): 'gpu-video' | 'gpu-image' | 'cpu-video' — 필요할 때만 생성.
+      // 자세 엔진: 'pose-cpu'(VIDEO) · 'pose-gpu-image' · 'pose-cpu-image'(IMAGE, 자세 자가 진단용). 'pose-gpu'(VIDEO)는 기본 models.pose.
       models.createEngine=async function(key){
         if(models.engines[key]) return models.engines[key];
         var inst;
-        if(key==='pose-cpu'){ inst=await mp.PoseLandmarker.createFromOptions(fs,poseOpts('CPU')); }
+        if(key.indexOf('pose-')===0){ var pdel=key.indexOf('pose-gpu')===0?'GPU':'CPU', po=poseOpts(pdel); if(/-image$/.test(key)) po.runningMode='IMAGE'; inst=await mp.PoseLandmarker.createFromOptions(fs,po); }
         else { var del=key.indexOf('gpu')===0?'GPU':'CPU', mode=key.indexOf('image')>0?'IMAGE':'VIDEO'; var o=faceOpts(del); o.runningMode=mode; o.numFaces=2; inst=await mp.FaceLandmarker.createFromOptions(fs,o); }
         models.engines[key]=inst; return inst;
       };
+      models.engines['pose-'+delegateUsed.toLowerCase()]=pose; // 기본 자세 인스턴스(VIDEO)를 실제 위임 이름으로 등록
       return models;
     } catch(e){if(face)face.close();if(pose)pose.close();modelsPromise=null;throw e;}
   })().catch(function(e){modelsPromise=null;throw e;});
@@ -2811,6 +2831,63 @@ function ensureProbeEngines(s){
   Promise.all(FACE_PROBE_KEYS.map(function(k){ return m.createEngine?m.createEngine(k).catch(function(e){ s.probeEngineErrors=(s.probeEngineErrors||[]); s.probeEngineErrors.push(k+': '+String(e.message||e)); return null; }):Promise.resolve(null); }))
     .then(function(){ s.probeEnginesReady=true; s.probeEnginesPending=false; });
 }
+/* ---------- 자세 모델 자가 진단·자동 전환 ----------
+ * 얼굴 모델은 얼굴을 보는데 자세 모델이 0명인 프레임이 이어지면(S25+ 녹화 파일 2026-10-22: 자세 1/271 프레임, 얼굴 260/271),
+ * 같은 프레임을 [GPU/영상 요소, GPU/캔버스, CPU/캔버스, CPU/영상 요소] 조합에 넣어 비교한다.
+ *  - '캔버스' = 2D drawImage로 그린 사본(긴 변 ≤512). 영상 요소를 GPU 텍스처로 직접 올리는 경로와 달리 회전 메타데이터·HDR이 2D 경로에서 정규화된다.
+ *  - 몸을 찾는 조합이 있으면 그 조합으로 전환(세션당 최대 3회). 현재 조합만 찾으면(VIDEO 추적 상태 문제) 같은 조합의 IMAGE 모드로 전환.
+ *  - 모든 조합이 0명이면 전환하지 않는다 — 몸통이 화면에 없거나 가려진 것. 결과는 CSV '# pose_engine'. 호흡수를 채우기 위한 기준 완화는 없음. */
+var POSE_PROBE_COMBOS=[{eng:'gpu',src:'video'},{eng:'gpu',src:'canvas'},{eng:'cpu',src:'canvas'},{eng:'cpu',src:'video'}];
+var poseCv=null;
+function poseCanvas(s,srcEl){
+  if(poseCv&&s.poseCvFrame===s.frameIdx) return poseCv;
+  var SW=srcEl.videoWidth||srcEl.naturalWidth||srcEl.width||AW, SH=srcEl.videoHeight||srcEl.naturalHeight||srcEl.height||AH;
+  var sc=Math.min(1,512/Math.max(SW,SH)), cw=Math.max(2,Math.round(SW*sc)), ch=Math.max(2,Math.round(SH*sc));
+  if(!poseCv) poseCv=document.createElement('canvas');
+  if(poseCv.width!==cw||poseCv.height!==ch){ poseCv.width=cw; poseCv.height=ch; }
+  var cc=poseCv.getContext('2d'); if(cc) cc.drawImage(srcEl,0,0,cw,ch);
+  s.poseCvFrame=s.frameIdx; return poseCv;
+}
+function poseCfgKey(c){ return c.eng+'/'+c.src+(c.mode==='image'?'/image':''); }
+/* 현재 설정 s.poseCfg={eng:'gpu'|'cpu', src:'video'|'canvas', mode:'video'|'image'}로 자세 추론 */
+function poseDetect(s,srcEl){
+  var c=s.poseCfg, key='pose-'+c.eng+(c.mode==='image'?'-image':''), inst=(s.models.engines&&s.models.engines[key])||(key==='pose-'+(s.models.delegate||'gpu').toLowerCase()?s.models.pose:null);
+  if(!inst) return null;
+  var src=c.src==='canvas'?poseCanvas(s,srcEl):srcEl;
+  return c.mode==='image'?inst.detect(src):inst.detectForVideo(src,mpStamp());
+}
+function ensurePoseProbeEngines(s){
+  if(s.poseProbeReady||s.poseProbePending) return;
+  s.poseProbePending=true;
+  var m=s.models, keys=['pose-cpu','pose-cpu-image'].concat(m.delegate==='GPU'?['pose-gpu-image']:[]);
+  Promise.all(keys.map(function(k){ return m.createEngine?m.createEngine(k).catch(function(e){ s.poseProbeErrors=(s.poseProbeErrors||[]); s.poseProbeErrors.push(k+': '+String(e.message||e)); return null; }):Promise.resolve(null); }))
+    .then(function(){ s.poseProbeReady=true; s.poseProbePending=false; });
+}
+function poseProbeOnFrame(s,srcEl){
+  var out={t:s.lastT!=null?+(s.lastT-s.startT).toFixed(2):null,current:poseCfgKey(s.poseCfg),results:{}};
+  POSE_PROBE_COMBOS.forEach(function(c){
+    var key=c.eng+'/'+c.src, inst=s.models.engines&&s.models.engines['pose-'+c.eng+'-image'];
+    if(!inst||typeof inst.detect!=='function'){ out.results[key]={persons:null,note:'미생성'}; return; }
+    var r={persons:null,torsoVis:null,ms:null};
+    try{ var t0=performance.now(); var res=inst.detect(c.src==='canvas'?poseCanvas(s,srcEl):srcEl); var n=(res&&res.landmarks)?res.landmarks.length:0; r.persons=n;
+      if(n){ var p=res.landmarks[0]; r.torsoVis=[11,12,23,24].map(function(i){ return (p[i]&&p[i].visibility!=null)?+p[i].visibility.toFixed(2):null; }); }
+      r.ms=Math.round(performance.now()-t0); }
+    catch(e){ r.error=String(e.message||e); }
+    out.results[key]=r;
+  });
+  return out;
+}
+/* 전환 대상 고르기: 몸을 찾은 조합 중 몸통 가시도 평균이 가장 높은 것(현재 조합 제외; 같은 위임이면 +0.05). 현재 조합만 찾았으면 같은 조합의 IMAGE 모드. */
+function pickPoseCombo(pr,cur){
+  var curKey=cur.eng+'/'+cur.src, best=null, bs=-1, curFound=false;
+  POSE_PROBE_COMBOS.forEach(function(c){ var key=c.eng+'/'+c.src, r=pr.results[key]; if(!r||r.error||r.note||!r.persons) return;
+    if(key===curKey){ curFound=true; return; }
+    var vis=(r.torsoVis||[]).filter(function(v){return v!=null;}); var sc=(vis.length?vis.reduce(function(a,b){return a+b;},0)/vis.length:0.5)+(c.eng===cur.eng?0.05:0);
+    if(sc>bs){ bs=sc; best={eng:c.eng,src:c.src,mode:'video'}; } });
+  if(best) return best;
+  if(curFound&&cur.mode!=='image') return {eng:cur.eng,src:cur.src,mode:'image'};
+  return null;
+}
 /* 자동 노출 보정(카메라 모드): 얼굴 색 표본의 절반 이상이 포화(clipped/overexposed)면 exposureCompensation을 0.7EV씩 내린다(최대 3단).
  * 브라우저가 보고한 범위 안에서만, 변경 때마다 색 기준 구간을 새로 시작하고 CSV에 기록한다. 측정이 끝나면 원래 값으로 되돌린다. */
 var exposureCtl={track:null,original:null,current:null,pending:false,steps:[],lastT:-Infinity,supported:null,session:0};
@@ -2865,15 +2942,40 @@ function exposureAdapt(s,vt){
 function pushTracked(s,gray,vt,srcEl){
   var t0=performance.now(), face=null, pose=null, poseSkipped=!!s.skipPose, cropUsed=false;
   if(!s.faceEngine){ s.faceEngine=s.models.primaryKey||((s.models.delegate==='GPU')?'gpu-video':'cpu-video'); s.models.engines=s.models.engines||{}; if(!s.models.engines[s.faceEngine]) s.models.engines[s.faceEngine]=s.models.face; }
+  // 자세 입력 기본값: 카메라=영상 요소 직접(실측에서 동작 확인), 녹화 파일=2D 캔버스 사본 — S25+ 녹화 파일(2026-10-22)에서 영상 요소 직접 입력은 자세 1/271 프레임.
+  // 일시정지·탐색(seek) 상태의 영상 요소를 GPU 텍스처로 올리는 경로가 기기에 따라 빈 프레임을 줄 수 있음(미확인 가설, 다음 실측의 # pose_engine로 확인). 어느 쪽이든 실패하면 아래 자가 진단이 다른 조합을 시험한다.
+  if(!s.poseCfg) s.poseCfg={eng:(s.models.delegate==='GPU')?'gpu':'cpu',src:(s.mode==='file')?'canvas':'video',mode:'video'};
+  if(!s.frame) s.frame={srcW:srcEl.videoWidth||srcEl.naturalWidth||srcEl.width||null,srcH:srcEl.videoHeight||srcEl.naturalHeight||srcEl.height||null,AW:AW,AH:AH};
+  s.frameIdx=(s.frameIdx||0)+1;
   try{
     face=sanitizeFaces(faceDetect(s.models,s.faceEngine,srcEl));
-    if(!poseSkipped) pose=s.models.pose.detectForVideo(srcEl,mpStamp());
+    if(!poseSkipped) pose=poseDetect(s,srcEl);
   }catch(e){ s.mpErrors++; s.lastMpError=String(e&&e.message||e); }
   var faceNRaw=(face&&face.faceNRaw!=null)?face.faceNRaw:((face&&face.faceLandmarks)?face.faceLandmarks.length:0);
   var coreMs=performance.now()-t0; // 얼굴+자세 기본 추론 시간(크롭·진단 제외) — 자세 생략 판단은 이 값으로만
+  var poseN=(pose&&pose.landmarks)?pose.landmarks.length:0;
+  // 자세 자가 진단: 얼굴은 보이는데 자세 0명이 6프레임 이상 이어지면 대체 조합을 같은 프레임에서 검사(2초마다, 5회 뒤엔 10초마다)
+  if(faceFound(face)&&!poseN&&!poseSkipped&&!s.poseProbeLocked){
+    s.poseMissWithFace=(s.poseMissWithFace||0)+1;
+    if(s.poseMissWithFace>=6){
+      if(!s.poseProbeReady) ensurePoseProbeEngines(s);
+      else if(s.lastPoseProbeT==null||vt-s.lastPoseProbeT>=((s.poseProbes||[]).length>=5?10:2)){
+        s.lastPoseProbeT=vt; s.poseProbes=s.poseProbes||[];
+        var pp=poseProbeOnFrame(s,srcEl); if(s.poseProbes.length<20) s.poseProbes.push(pp);
+        var pick=pickPoseCombo(pp,s.poseCfg);
+        if(pick){
+          s.poseSwitches=(s.poseSwitches||[]); s.poseSwitches.push({t:+vt.toFixed(2),from:poseCfgKey(s.poseCfg),to:poseCfgKey(pick)});
+          s.poseSwitch={t:+vt.toFixed(2),from:poseCfgKey(s.poseCfg),to:poseCfgKey(pick),probe:pp};
+          s.poseCfg=pick; s.poseMissWithFace=0;
+          if(s.poseSwitches.length>=3) s.poseProbeLocked=true;
+          try{ pose=poseDetect(s,srcEl); poseN=(pose&&pose.landmarks)?pose.landmarks.length:0; }catch(e){ s.mpErrors++; s.lastMpError=String(e&&e.message||e); }
+          demoBanner('자세 모델 입력 전환: '+s.poseSwitch.from+' → '+s.poseSwitch.to+' (이 조합에서 몸이 검출됨)');
+        } else if(!s.poseNoneNoted){ s.poseNoneNoted=true; demoBanner('몸(가슴·배)을 찾지 못함 — 대체 엔진·입력 조합에서도 0명. 얼굴만 크게 찍히면 호흡을 잴 수 없습니다. 가슴·배까지 화면에 들어오게 촬영하세요.',true); }
+      }
+    }
+  } else if(poseN) s.poseMissWithFace=0;
   var posePts=(pose&&pose.landmarks&&pose.landmarks.length===1)?pose.landmarks[0].map(function(p){return {x:p.x*AW,y:p.y*AH,vis:p.visibility!=null?p.visibility:1};}):null;
   var poseFace=!!(posePts&&posePts[2]&&posePts[5]&&posePts[2].vis>=0.6&&posePts[5].vis>=0.6);
-  s.frameIdx=(s.frameIdx||0)+1;
   if(!faceFound(face)&&posePts){
     var cropA=faceCropFromPose(posePts);
     // 크롭 재검출: 연속 실패가 쌓이면 간격을 늘림(처리 시간 절약) — 5회 미만 매 프레임, 20회 미만 3프레임마다, 그 뒤 6프레임마다
@@ -2903,6 +3005,7 @@ function pushTracked(s,gray,vt,srcEl){
   } else if(faceFound(face)) s.faceMissWithPose=0;
   var land=window.PATROI.build(face||{faceLandmarks:[]},pose||{landmarks:[]},AW,AH);
   if(cropUsed&&land.faceSrc==='mp') land.faceSrc='mp-crop';
+  if(poseSkipped) land.notes=land.notes.filter(function(n){return n.indexOf('몸을 찾지 못했습니다')<0;}).concat(['자세 추론 생략(처리 지연 교대) — 미검출이 아니며 창은 이전 위치를 이어감']);
   // 얼굴·몸 불일치(다른 사람의 얼굴일 수 있음) 또는 여러 사람: 얼굴 기반 지표(외관·색)를 쓰지 않고, 호흡 창도 자세 대체를 쓰지 않는다
   var subjectRejected=(land.subjectMatch==='rejected'||land.subjectMatch==='ambiguous');
   var fi=subjectRejected?-1:((land.faceIndex!=null)?land.faceIndex:((face&&face.faceLandmarks&&face.faceLandmarks.length===1)?0:-1));
@@ -2918,7 +3021,7 @@ function pushTracked(s,gray,vt,srcEl){
   var lmLast=s.lm.last, frameMotion=(lmLast&&lmLast.idx!=null&&lmLast.t===vt)?lmLast.idx:null;
   s.respA.pushFrame(gray,vt,{window:fr.window,bodyBox:fb.window||s.lastBodyWin||null,camDy:cr.ok?cr.centerDy:null,roundDy:fr.roundDy,breakContinuity:fr.breakContinuity,motion:frameMotion});
   s.appear.push(vt,blend,facePts);
-  var rec={t:vt,trackStatus:fr.status,camOk:!!cr.ok,camDx:cr.ok?cr.centerDx:null,camDy:cr.ok?cr.centerDy:null,faceSrc:land.faceSrc||'none',faceN:(face&&face.faceLandmarks)?face.faceLandmarks.length:0,faceNRaw:faceNRaw,poseSkip:poseSkipped?1:0};
+  var rec={t:vt,trackStatus:fr.status,camOk:!!cr.ok,camDx:cr.ok?cr.centerDx:null,camDy:cr.ok?cr.centerDy:null,faceSrc:land.faceSrc||'none',faceN:(face&&face.faceLandmarks)?face.faceLandmarks.length:0,faceNRaw:faceNRaw,poseSkip:poseSkipped?1:0,poseN:poseSkipped?null:poseN};
   var skinOut=s.skin.push(subjectRejected?{faceLandmarks:[]}:faceOne,srcEl,vt,(land.faceSrc==='pose'&&!subjectRejected)?{src:'pose',lip:land.rois.lip,cheek:land.rois.cheek,cheekAlt:land.rois.cheekAlt,aw:AW,ah:AH}:null,{mouthOpen:!!(blend&&Number.isFinite(blend.jawOpen)&&blend.jawOpen>0.3),reasonOverride:subjectRejected?(land.subjectMatch==='rejected'?'subject-mismatch':'multiple-faces'):null});
   ['lip','cheek'].forEach(function(k){var x=skinOut[k];rec[k]=x.reason?{reason:x.reason,segment:s.sites[k].agg.finish().segment,clipRatio:x.stats&&x.stats.clipRatio,meanY:x.stats&&x.stats.meanY}:x.stats;});
   exposureAdapt(s,vt);
@@ -2928,7 +3031,7 @@ function pushTracked(s,gray,vt,srcEl){
   renderSkinLive(s,false);
   var cost=performance.now()-t0;
   s.skipPose = (coreMs>110) && !s.skipPose; // 기본 추론(얼굴+자세)만 110ms 넘을 때 다음 표본의 자세 모델 생략(교대) — 크롭·진단 시간은 포함하지 않음
-  s.diag={lastMs:Math.round(cost),coreMs:Math.round(coreMs),skipPose:s.skipPose,mpErrors:s.mpErrors,lastMpError:s.lastMpError||null,faceEngine:s.faceEngine,faceEngineSwitch:s.faceEngineSwitch||null,probes:(s.probes||[]).length,probeEngineErrors:s.probeEngineErrors||null,cropTries:s.cropTries||0,cropHits:s.cropHits||0,cropMiss:s.cropMiss||0,gapCount:s.gapCount||0,camPts:cr.pts||0,camInliers:cr.inliers||0,camReason:cr.ok?null:cr.reason,respWindow:fr.status,notes:land.notes,delegate:s.models&&s.models.delegate};
+  s.diag={lastMs:Math.round(cost),coreMs:Math.round(coreMs),skipPose:s.skipPose,mpErrors:s.mpErrors,lastMpError:s.lastMpError||null,faceEngine:s.faceEngine,faceEngineSwitch:s.faceEngineSwitch||null,probes:(s.probes||[]).length,probeEngineErrors:s.probeEngineErrors||null,cropTries:s.cropTries||0,cropHits:s.cropHits||0,cropMiss:s.cropMiss||0,gapCount:s.gapCount||0,camPts:cr.pts||0,camInliers:cr.inliers||0,camReason:cr.ok?null:cr.reason,respWindow:fr.status,respWindowRect:fr.window||null,poseEngine:poseCfgKey(s.poseCfg),poseSwitch:s.poseSwitch?{t:s.poseSwitch.t,from:s.poseSwitch.from,to:s.poseSwitch.to}:null,poseProbes:(s.poseProbes||[]).length,notes:land.notes,delegate:s.models&&s.models.delegate};
   drawLive(s);
 }
 function drawLive(s){
@@ -2938,7 +3041,7 @@ function drawLive(s){
   var draw=function(r,col,label){ if(!r)return; c.strokeStyle=col;c.lineWidth=2;if(r.polygon){c.beginPath();r.polygon.forEach(function(p,i){if(i)c.lineTo(p.x,p.y);else c.moveTo(p.x,p.y);});c.closePath();c.stroke();}else c.strokeRect(r.x,r.y,r.w,r.h); c.font='11px sans-serif'; c.fillStyle=col; c.fillText(label,r.x+3,Math.max(11,r.y-3)); };
   draw(B.body,ROI_DEFS.body.color,'몸'); draw(B.resp,ROI_DEFS.resp.color,'가슴·배 '+(B.respStatus||'')+(B.respFallback?' (어깨 기준)':'')); draw(B.lip,ROI_DEFS.lip.color,'입술'); draw(B.cheek,ROI_DEFS.cheek.color,'뺨');
   c.fillStyle='rgba(0,0,0,.55)'; c.fillRect(0,lv.height-16,lv.width,16); c.fillStyle='#fff'; c.font='11px sans-serif';
-  c.fillText((B.face?(B.faceSrc==='mp-crop'?'얼굴 ✓(확대)':'얼굴 ✓'):(B.faceSrc==='pose'?'얼굴 ~(자세대체)':(B.faceSrc==='mismatch'?'얼굴 ✗(몸과 불일치)':'얼굴 ✗')))+(s.faceEngine?'['+s.faceEngine+']':'')+'  '+(B.pose?'자세 ✓':'자세 ✗')+'  손떨림 보정 '+(B.cam&&B.cam.ok?('✓ '+B.cam.inliers+'점'):'✗')+'  '+(s.diag?s.diag.lastMs+'ms':''),4,lv.height-4);
+  c.fillText((B.face?(B.faceSrc==='mp-crop'?'얼굴 ✓(확대)':'얼굴 ✓'):(B.faceSrc==='pose'?'얼굴 ~(자세대체)':(B.faceSrc==='mismatch'?'얼굴 ✗(몸과 불일치)':'얼굴 ✗')))+(s.faceEngine?'['+s.faceEngine+']':'')+'  '+(B.pose?'자세 ✓':'자세 ✗')+(s.poseCfg?'['+poseCfgKey(s.poseCfg)+']':'')+'  손떨림 보정 '+(B.cam&&B.cam.ok?('✓ '+B.cam.inliers+'점'):'✗')+'  '+(s.diag?s.diag.lastMs+'ms':''),4,lv.height-4);
 }
 function renderAppearance(r){
   var sec=$('stepAppear'); if(!r){sec.hidden=true;return;} sec.hidden=false;
@@ -3039,7 +3142,7 @@ function renderPatBoard(run){
   else setTile('appearance','눈 뜸 '+pct(a.eyeOpenRatio),'시선 중앙 '+pct(a.gazeCenterRatio)+' · 얼굴 '+pct(a.faceRatio)+(a.motionMean!=null?' · 몸 움직임 '+a.motionMean.toFixed(0)+' %/s':'')+(a.jawOpenMean!=null?' · 입 벌림 '+a.jawOpenMean.toFixed(2):''));
   // 호흡
   var b=f.breathing, whoTxt={above:'WHO 참고 기준 이상',below:'WHO 참고 기준 미만(정상 아님)',held:'기준 비교 보류','unsupported-age':'연령 입력 시 WHO 기준 비교',unavailable:'기준 비교 불가'};
-  if(b.unavailable) setTile('breathing','—','측정 불가: '+b.unavailable.slice(0,90));
+  if(b.unavailable) setTile('breathing','—','측정 불가: '+b.unavailable.slice(0,160));
   else setTile('breathing',b.bpm.toFixed(0)+' <small>회/분</small>'+(b.lowConfidence?' <small style="color:var(--bad)">신뢰 낮음</small>':''),(R&&R.quietNote?'조용한 '+R.usedT0.toFixed(0)+'~'+R.usedT1.toFixed(0)+'초만 사용':(b.window?b.window[0].toFixed(0)+'~'+b.window[1].toFixed(0)+'초 구간':'전체 구간'))+({expansion:' · 확장형 신호','translation-lower':' · 배 쪽 신호','translation-upper':' · 가슴 쪽 신호'}[b.signalKind]||'')+(b.lowConfidence&&R&&R.motionDuringWindow!=null?' · 움직임 중('+R.motionDuringWindow.toFixed(0)+' %/s)':'')+'<br>'+(whoTxt[b.who]||'연령 입력 시 WHO 기준 비교')+(b.whoThreshold!=null?' (≥'+b.whoThreshold+'회/분)':''));
   // 순환
   var c=f.circulation;
@@ -3061,7 +3164,8 @@ function renderPatBoard(run){
   if(autoState) auto.push(autoState);
   var obsAb=[], obsNo=[], obsUnk=[]; [['appearance','외관'],['breathing','호흡'],['circulation','순환']].forEach(function(p){ (patObs[p[0]]==='abnormal'?obsAb:patObs[p[0]]==='normal'?obsNo:obsUnk).push(p[1]); });
   var imp=patImpressionFromObs(patObs), sevCls={low:'sev-low',mid:'sev-mid',high:'sev-high',incomplete:'sev-none'}[imp.severity];
-  var hints=[]; if(b.who==='above') hints.push('호흡수 '+b.bpm.toFixed(0)+'회/분 ≥ WHO 기준 '+b.whoThreshold+' → 호흡 축 \'이상\' 검토'); if(b.lowConfidence) hints.push('호흡수 신뢰 낮음(움직임 중) — 조용할 때 재측정'); if(!a.unavailable&&a.eyeOpenRatio!=null&&a.eyeOpenRatio<0.3) hints.push('눈 뜸 '+pct(a.eyeOpenRatio)+' — 수면 여부와 반응성 직접 확인');
+  var hints=[]; if(b.who==='above') hints.push('호흡수 '+b.bpm.toFixed(0)+'회/분 ≥ WHO 기준 '+b.whoThreshold+' → 호흡 축 \'이상\' 검토'); if(b.lowConfidence) hints.push('호흡수 신뢰 낮음(움직임 중) — 조용할 때 재측정');
+  if(b.unavailable&&R&&R.tracked&&R.pairs&&R.noWindow>=0.5*R.pairs) hints.push('몸(가슴·배)을 찾지 못한 프레임 '+R.noWindow+'/'+R.pairs+' — 호흡은 가슴·배가 화면에 들어와야 측정됨(얼굴만 크게 찍지 말 것)'); if(!a.unavailable&&a.eyeOpenRatio!=null&&a.eyeOpenRatio<0.3) hints.push('눈 뜸 '+pct(a.eyeOpenRatio)+' — 수면 여부와 반응성 직접 확인');
   var sum=[];
   sum.push('<div class="patVerdict '+sevCls+'"><span class="patVerdictLbl">PAT 일반 인상(교과서 표)</span><b>'+imp.label+'</b><span class="patSev">중증도 '+SEV_KO[imp.severity]+'</span></div>');
   sum.push('<small>'+imp.note+' · 평가자가 누른 세 축으로 정해지며 카메라 수치로 바꾸지 않습니다'+(patObs.impression&&patObs.impression!==imp.label&&imp.severity!=='incomplete'?' · <b>평가자 선택('+patObs.impression+')과 표가 다름 — 평가자 선택을 기록</b>':'')+'</small>');
@@ -3200,8 +3304,9 @@ function publishMeasurement(s,final){
   liveMeta={mode:s.mode,final:final,elapsed:elapsed,measuredHz:hz,maxGapSec:s.maxGap,roi:s.roi,roiOrigin:s.origin,autoRoiTracksContinuously:!!s.tracked,roiSource:s.roiSource,targetSec:s.targetSec,
     skinEngine:s.skin?window.PATSKIN.version:null,skinConfig:s.skin?window.PATSKIN.config:null,engine:s.tracked?'MediaPipe 연속 추적 + 유사변환 손떨림 보정 (피부 v12; 얼굴 '+(s.faceEngine||'?')+' / 자세 '+(s.models&&s.models.delegate||'?')+')':(s.cv?'OpenCV 4.10.0 LK':'Legacy JS'),diagnostics:s.tracked?s.diag:(s.cv?s.cv.diagnostics():null)};
   $('diagDump').textContent=s.tracked?JSON.stringify(s.diag,null,2):(s.cv?JSON.stringify(s.cv.diagnostics(),null,2):'기본 분석 모드: 행 프로파일 / 블록 매칭');
-  if(s.mode==='camera'&&cameraDiag)liveMeta.cameraSettings=window.PATCAMDIAG.read(stream.getVideoTracks()[0]);
-  if(s.tracked){ liveMeta.faceProbes=(s.probes||[]).map(function(p){return {t:p.t,results:p.results};}); liveMeta.faceEngine=s.faceEngine||null; liveMeta.faceEngineSwitch=s.faceEngineSwitch||null; liveMeta.faceEngineSwitches=s.faceEngineSwitches||[]; liveMeta.exposureSteps=s.exposureSteps||[]; liveMeta.exposureSupported=s.exposureSupported!=null?s.exposureSupported:null; }
+  if(s.mode==='camera'&&cameraDiag&&stream)liveMeta.cameraSettings=window.PATCAMDIAG.read(stream.getVideoTracks()[0]);
+  if(s.tracked){ liveMeta.faceProbes=(s.probes||[]).map(function(p){return {t:p.t,results:p.results};}); liveMeta.faceEngine=s.faceEngine||null; liveMeta.faceEngineSwitch=s.faceEngineSwitch||null; liveMeta.faceEngineSwitches=s.faceEngineSwitches||[]; liveMeta.exposureSteps=s.exposureSteps||[]; liveMeta.exposureSupported=s.exposureSupported!=null?s.exposureSupported:null;
+    liveMeta.frame=s.frame||null; liveMeta.poseEngine={engine:s.poseCfg?poseCfgKey(s.poseCfg):null,switched:s.poseSwitch?{t:s.poseSwitch.t,from:s.poseSwitch.from,to:s.poseSwitch.to}:null,switches:s.poseSwitches||[],probes:(s.poseProbes||[]).map(function(p){return {t:p.t,current:p.current,results:p.results};}),probeErrors:s.poseProbeErrors||null}; }
   lastRun={respRes:respRes,motionRes:motionRes,colorRes:colorRes,appearRes:appearRes,sites:s.sites,records:s.records,meta:liveMeta};
   showResult(respRes);renderMotion(motionRes);renderColor(colorRes,s.sites);renderAppearance(appearRes);runInterpret();renderTriangle(lastRun);renderPatBoard(lastRun);if(s.skin)renderSkinLive(s,true);
   if(s.mode==='camera')$('liveStatus').textContent=(final?'측정 결과':'실시간 관찰 중 · 중간 추정')+' · '+elapsed.toFixed(1)+'초 · 실제 분석 '+hz.toFixed(1)+'프레임/초. '+(elapsed<60?'1분 참고 기준 비교는 아직 보류됩니다.':'');
@@ -3656,7 +3761,9 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
   if(lastRun&&lastRun.meta&&lastRun.meta.exposureSteps) lines.push('# exposure_adjust(자동 노출 보정, EV): '+JSON.stringify(lastRun.meta.exposureSteps));
   if (lastRun && lastRun.meta && lastRun.meta.diagnostics && lastRun.meta.diagnostics.faceEngine) lines.push('# face_engine: ' + JSON.stringify({ engine: lastRun.meta.diagnostics.faceEngine, switched: lastRun.meta.diagnostics.faceEngineSwitch, probes: lastRun.meta.faceProbes || null, probeEngineErrors: lastRun.meta.diagnostics.probeEngineErrors }));
   (function(){ var c={mp:0,'mp-crop':0,pose:0,none:0,mismatch:0,poseSkipped:0}; records.forEach(function(r){ if(r.faceSrc) c[r.faceSrc]=(c[r.faceSrc]||0)+1; if(r.poseSkip) c.poseSkipped++; }); if(records.length) lines.push('# face_src(프레임 수; mp=얼굴 모델 전체 프레임, mp-crop=자세 모델이 가리킨 얼굴 영역을 잘라 재검출, pose=자세 모델 대체(품질 낮음), none=미검출; poseSkipped=과부하로 자세 추론 생략): '+JSON.stringify(c)); })();
-  lines.push('t_s,resp_disp_px,motion_idx_pct_s,motion_valid_ratio,motion_bg_ok,cam_idx_pct_s,motion_reason,lip_L,lip_a,lip_b,lip_reason,cheek_L,cheek_a,cheek_b,cheek_reason,lip_cheek_dE_aux,track_status,cam_ok,cam_dx_px,cam_dy_px,eye_open,gaze_off,jaw_open,lip_region,lip_segment,lip_pixels,cheek_region,cheek_segment,cheek_pixels,face_src,face_n,pose_skip,face_n_raw,lip_clip,lip_meanY,cheek_clip,cheek_meanY,resp_div_px');
+  if(lastRun&&lastRun.meta&&lastRun.meta.poseEngine){ var pe=lastRun.meta.poseEngine, pc={found:0,none:0,multi:0,skipped:0}; records.forEach(function(r){ if(r.poseN==null){ if(r.poseSkip) pc.skipped++; return; } if(r.poseN===1) pc.found++; else if(r.poseN>1) pc.multi++; else pc.none++; });
+    lines.push('# pose_engine(자세 모델 엔진/입력; video=영상 요소 직접, canvas=2D 캔버스 사본; 자가 진단은 얼굴은 보이는데 자세 0명일 때만 실행): '+JSON.stringify({engine:pe.engine,switched:pe.switched,switches:pe.switches,poseFrames:pc,probes:pe.probes,probeErrors:pe.probeErrors})); }
+  lines.push('t_s,resp_disp_px,motion_idx_pct_s,motion_valid_ratio,motion_bg_ok,cam_idx_pct_s,motion_reason,lip_L,lip_a,lip_b,lip_reason,cheek_L,cheek_a,cheek_b,cheek_reason,lip_cheek_dE_aux,track_status,cam_ok,cam_dx_px,cam_dy_px,eye_open,gaze_off,jaw_open,lip_region,lip_segment,lip_pixels,cheek_region,cheek_segment,cheek_pixels,face_src,face_n,pose_skip,face_n_raw,lip_clip,lip_meanY,cheek_clip,cheek_meanY,resp_div_px,pose_n');
   var apAt=new Map(ap&&ap.series?ap.series.map(function(v){return [v.t.toFixed(6),v];}):[]);
   if(lastRun && lastRun.meta)lines.splice(1,0,'# capture: '+JSON.stringify(lastRun.meta));
   var raw = respRes && respRes.raw;
@@ -3683,7 +3790,8 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
       lip&&lip.patchId||'',lip&&lip.segment||'',lip&&lip.keptPixels||'',chk&&chk.patchId||'',chk&&chk.segment||'',chk&&chk.keptPixels||'',
       rec.faceSrc||'', rec.faceN!=null?rec.faceN:'', rec.poseSkip!=null?rec.poseSkip:'', rec.faceNRaw!=null?rec.faceNRaw:'',
       lip&&lip.clipRatio!=null?lip.clipRatio.toFixed(2):'', lip&&lip.meanY!=null?lip.meanY.toFixed(0):'', chk&&chk.clipRatio!=null?chk.clipRatio.toFixed(2):'', chk&&chk.meanY!=null?chk.meanY.toFixed(0):'',
-      csvNum(divAt.get(rec.t.toFixed(6)), 3)
+      csvNum(divAt.get(rec.t.toFixed(6)), 3),
+      rec.poseN!=null?rec.poseN:''
     ].join(','));
   }
   lastCsv = lines.join('\n');
