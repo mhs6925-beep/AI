@@ -2,7 +2,7 @@
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PAT 삼각형 영상 평가 v12.12</title>
+<title>PAT 삼각형 영상 평가 v12.13</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* 레이아웃: 단일 컬럼 단계형(①~⑦) 도구 페이지, 폰 우선 */
@@ -124,7 +124,7 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
 
 <main>
   <header>
-    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.12 · 연구용</span></h1>
+    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.13 · 연구용</span></h1>
     <p class="sub">휴대폰 한 대로 소아평가삼각형(PAT)의 세 축 — 호흡·외관·피부순환 — 을 객관적 수치로 기록합니다. 손에 들고 한 번 촬영하면 얼굴·몸을 자동으로 따라가며 측정합니다. 측정값만 제공하며 정상/이상 판정은 하지 않습니다.</p>
   </header>
 
@@ -201,7 +201,7 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
     <div id="camBanner" class="reason" hidden></div>
     <p id="liveStatus" class="hint" role="status" aria-live="polite">v11 · 스크립트 실행 대기. 이 문구가 계속 보이면 현재 미리보기에서 실행이 차단되었거나 초기화에 실패했습니다.</p>
     <p class="hint">실시간: 카메라 열기 → 자동 영역 찾기 → 위치 확인 → 60초 측정. 카메라 권한과 HTTPS 주소가 필요합니다.
-    미리보기와 중간 결과를 갱신하며 호흡수는 최소 12초 뒤부터 추정을 시도합니다. 1분 참고 기준 비교용 파일은 61초 이상 녹화하세요.</p>
+    미리보기와 중간 결과를 갱신하며 호흡수는 최소 10초 뒤부터 추정을 시도하고(10~20초는 빠른 추정) 계속 갱신합니다. 1분 참고 기준 비교용 파일은 61초 이상 녹화하세요.</p>
   </section>
 
   <section class="step" id="stepCtx">
@@ -397,6 +397,8 @@ const DEV_CONFIG = {
   winHopSec: 2,          // 탐색 창 이동 간격 (개발용)
   spikeRatio: 6,         // 창 내 최대 절대값이 RMS의 이 배수 초과면 '움직임 스파이크 구간'으로 제외 (개발용)
   rrMismatchMax: 0.3,    // 자기상관 bpm과 피크 계수 bpm의 상대 불일치 상한 — 초과 시 '분석 불가' (개발용)
+  peakSmoothSec: 0.5,    // 들숨 피크 검출 전 이동평균 평활 폭(초) — 계수·간격 계산용
+  peakPromK: 0.5,        // 들숨 피크 최소 돌출(prominence) = peakPromK × 신호 표준편차
 
   // ---- 움직임(2D optical flow, 블록매칭) — 모두 개발용 설정값 ----
   motionGridStep: 12,    // ROI 내 추적점 간격(px)
@@ -690,6 +692,29 @@ function peakCountRate(x, fs, cfg) {
 }
 
 /*
+ * 들숨 피크 검출(호흡수 계수·간격용): peakSmoothSec 이동평균으로 평활한 뒤 국소최대 중
+ * 돌출(좌우로 더 높은 점을 만나기 전 최솟값 대비 높이)이 peakPromK·표준편차 이상이고 간격이 60/rrMaxBpm 이상인 것.
+ * 반환: 피크 표본 인덱스 배열. 호흡수 = 60·(n−1)/(마지막 피크 − 첫 피크) — 사람이 세는 방식(구간 안의 호흡 횟수)에 대응하며
+ * 구간 양끝의 부분 주기 편향이 없다. 자기상관 주기와 30% 넘게 다르면 쓰지 않는다(evalSignal).
+ */
+function findBreathPeaks(x, fs, cfg) {
+  const half = Math.max(0, Math.round(cfg.peakSmoothSec * fs / 2)), sm = new Float32Array(x.length);
+  for (let i = 0; i < x.length; i++) { let s = 0, n = 0; for (let j = Math.max(0, i - half); j <= Math.min(x.length - 1, i + half); j++) { s += x[j]; n++; } sm[i] = s / n; }
+  const sd = std(sm); if (!(sd > 1e-9)) return [];
+  const minDist = Math.max(2, Math.floor(fs * 60 / cfg.rrMaxBpm)), prom = cfg.peakPromK * sd;
+  const peaks = [];
+  for (let i = 1; i < sm.length - 1; i++) {
+    if (!(sm[i] > sm[i - 1] && sm[i] >= sm[i + 1])) continue;
+    let lmin = sm[i], j = i - 1; while (j >= 0 && sm[j] <= sm[i]) { if (sm[j] < lmin) lmin = sm[j]; j--; }
+    let rmin = sm[i]; j = i + 1; while (j < sm.length && sm[j] <= sm[i]) { if (sm[j] < rmin) rmin = sm[j]; j++; }
+    if (sm[i] - Math.max(lmin, rmin) < prom) continue;
+    if (peaks.length && i - peaks[peaks.length - 1] < minDist) { if (sm[i] > sm[peaks[peaks.length - 1]]) peaks[peaks.length - 1] = i; continue; }
+    peaks.push(i);
+  }
+  return peaks;
+}
+
+/*
  * 스트리밍 분석기: 프레임을 하나씩 push하면 프로파일·변위만 보관한다(프레임 원본 비보관).
  * 휴대폰 메모리에서 수백 프레임을 쌓지 않기 위한 구조.
  * 사용: const a = createAnalyzer(w, h, roi, cfg); a.pushFrame(gray, t); ... a.finish();
@@ -976,7 +1001,16 @@ function createAnalyzer(w, h, roi, userCfg) {
       const mismatch = (pkRate != null && bpm > 0) ? Math.abs(pkRate - bpm) / bpm : null;
       if (mismatch != null && mismatch > cfg.rrMismatchMax)
         return bad(`두 계산법 불일치 (자기상관 ${bpm.toFixed(0)} vs 피크 계수 ${pkRate.toFixed(0)}회/분, ${(mismatch * 100).toFixed(0)}% > 개발용 임계 ${cfg.rrMismatchMax * 100}%) — 무호흡 판정 아님`, { snr, camCorr });
-      return { status: 'ok', kind, bpm, acfPeak, windowT0: winT0, windowT1: winT1, peakCountBpm: pkRate, waveform: wave, duration, rms, bgRms, validRatio, sideApplied, sideNoise, snr, camCorr, pos: Array.from(pos) };
+      // 보고 호흡수: 들숨 피크 간격 기반(사람이 세는 방식). 불규칙 호흡에서 자기상관 주기(평균 오차 1.5·최대 8회/분, 합성)보다 정확(0.2·최대 1).
+      // 전체 사용 구간의 피크 간격이 자기상관 주기와 30% 안이면 채택, 아니면 안정 창 안의 피크만으로 재시도, 그래도 아니면 자기상관 주기를 보고(rateMethod='acf').
+      const periodBpm = bpm;
+      const pkIdx = findBreathPeaks(sig, cfg.resampleFs, cfg), pkT = pkIdx.map(i => uni.t[i]);
+      const ibiOf = (ts) => ts.length >= 3 ? 60 * (ts.length - 1) / (ts[ts.length - 1] - ts[0]) : null;
+      let breaths = null, rateMethod = 'acf';
+      const tryScope = (ts, scope, t0s, t1s) => { const v = ibiOf(ts); if (v != null && Math.abs(v - periodBpm) / periodBpm <= cfg.rrMismatchMax) { breaths = { n: ts.length, t0: t0s, t1: t1s, scope, peaksT: ts.map(v2 => +v2.toFixed(2)), countBpm: ts.length * 60 / Math.max(1e-6, t1s - t0s), ibiBpm: v }; rateMethod = 'ibi'; return true; } return false; };
+      if (!tryScope(pkT, 'full', uni.t[0], uni.t[uni.t.length - 1]) && winT0 != null) tryScope(pkT.filter(t => t >= winT0 && t <= winT1), 'window', winT0, winT1);
+      if (rateMethod === 'ibi') bpm = breaths.ibiBpm;
+      return { status: 'ok', kind, bpm, periodBpm, rateMethod, breaths, acfPeak, windowT0: winT0, windowT1: winT1, peakCountBpm: pkRate, waveform: wave, duration, rms, bgRms, validRatio, sideApplied, sideNoise, snr, camCorr, pos: Array.from(pos) };
     }
 
     // 이동형(행 프로파일 수직 변위) — 기본. 확장형(창 상·하 절반의 반대 방향 변위) — 위에서 내려다본 촬영에서 가슴이 카메라 쪽으로
@@ -1038,7 +1072,8 @@ function createAnalyzer(w, h, roi, userCfg) {
 
     return Object.assign({
       status: 'ok',
-      bpm: chosen.bpm,           // 회/분
+      bpm: chosen.bpm,           // 회/분 — rateMethod='ibi'면 들숨 피크 간격 평균, 'acf'면 자기상관 주기
+      periodBpm: chosen.periodBpm, rateMethod: chosen.rateMethod, breaths: chosen.breaths, // 계수 정보 {n, t0, t1, scope, peaksT, countBpm(n·60/T), ibiBpm}
       acfPeak: chosen.acfPeak,   // 자기상관 피크 (0~1, 주기성 지표, 임상 신뢰도 아님)
       signalKind: chosen.kind,   // 'translation' | 'expansion'
       windowT0: chosen.windowT0, windowT1: chosen.windowT1, // 안정 구간 추정 시 사용 구간(초), 전체 구간이면 null
@@ -2579,7 +2614,7 @@ function leaveCamera(reason){
   sourceButtons(false); $('btnRun').disabled=true; $('btnAgain').hidden=true;
   if(reason) $('liveStatus').textContent=reason;
 }
-$('liveStatus').textContent='v12.12 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
+$('liveStatus').textContent='v12.13 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
 $('btnLive').addEventListener('click',openCamera);
 window.addEventListener('unhandledrejection',function(e){$('liveStatus').textContent='실행 오류: '+(e.reason&&e.reason.message||e.reason);});
 function cameraTimeout(p,ms,message){var timer;return Promise.race([p,new Promise(function(_,reject){timer=setTimeout(function(){reject(new Error(message));},ms);})]).finally(function(){clearTimeout(timer);});}
@@ -3072,7 +3107,7 @@ function patAutoFacts(run){
   if(Ap&&Ap.status==='ok'){ f.appearance={faceRatio:+Ap.faceRatio.toFixed(2),eyeOpenRatio:Ap.eyeOpenRatio!=null?+Ap.eyeOpenRatio.toFixed(2):null,gazeCenterRatio:Ap.gazeCenterRatio!=null?+Ap.gazeCenterRatio.toFixed(2):null,jawOpenMean:Ap.jawOpenMean!=null?+Ap.jawOpenMean.toFixed(2):null}; }
   else f.appearance={unavailable:Ap?(Ap.reason||'불가'):(run&&run.meta&&run.meta.autoRoiTracksContinuously?'측정 중':'수동 모드 — 외관 자동 측정 없음')};
   if(M&&M.status==='ok') f.appearance.motionMean=+M.meanIdx.toFixed(1);
-  if(R&&R.status==='ok'){ f.breathing={bpm:+R.bpm.toFixed(1),lowConfidence:!!R.lowConfidence,signalKind:R.signalKind||null,window:(R.windowT0!=null?[+R.windowT0.toFixed(1),+R.windowT1.toFixed(1)]:null),who:I&&I.resp?I.resp.status:null,whoThreshold:I&&I.resp&&I.resp.thresholdBpm!=null?I.resp.thresholdBpm:null,usedT0:R.usedT0!=null?+R.usedT0.toFixed(1):null,usedT1:R.usedT1!=null?+R.usedT1.toFixed(1):null,observedSec:run.meta&&run.meta.elapsed!=null?+run.meta.elapsed.toFixed(1):null}; }
+  if(R&&R.status==='ok'){ f.breathing={bpm:+R.bpm.toFixed(1),rateMethod:R.rateMethod||'acf',periodBpm:R.periodBpm!=null?+R.periodBpm.toFixed(1):null,breaths:R.breaths?{n:R.breaths.n,t0:+R.breaths.t0.toFixed(1),t1:+R.breaths.t1.toFixed(1),scope:R.breaths.scope,countBpm:+R.breaths.countBpm.toFixed(1)}:null,lowConfidence:!!R.lowConfidence,signalKind:R.signalKind||null,window:(R.windowT0!=null?[+R.windowT0.toFixed(1),+R.windowT1.toFixed(1)]:null),who:I&&I.resp?I.resp.status:null,whoThreshold:I&&I.resp&&I.resp.thresholdBpm!=null?I.resp.thresholdBpm:null,usedT0:R.usedT0!=null?+R.usedT0.toFixed(1):null,usedT1:R.usedT1!=null?+R.usedT1.toFixed(1):null,observedSec:run.meta&&run.meta.elapsed!=null?+run.meta.elapsed.toFixed(1):null}; }
   else f.breathing={unavailable:R?(R.reason||'불가'):'측정 중'};
   ['lip','cheek'].forEach(function(k){ var r=C[k];
     if(r&&r.current&&r.current.lab) f.circulation[k]={L:+r.current.lab.L.toFixed(0),a:+r.current.lab.a.toFixed(0),b:+r.current.lab.b.toFixed(0),t:r.current.t!=null?+r.current.t.toFixed(1):null,src:(r.current.stats&&r.current.stats.pose)?'pose':'face'};
@@ -3143,7 +3178,10 @@ function renderPatBoard(run){
   // 호흡
   var b=f.breathing, whoTxt={above:'WHO 참고 기준 이상',below:'WHO 참고 기준 미만(정상 아님)',held:'기준 비교 보류','unsupported-age':'연령 입력 시 WHO 기준 비교',unavailable:'기준 비교 불가'};
   if(b.unavailable) setTile('breathing','—','측정 불가: '+b.unavailable.slice(0,160));
-  else setTile('breathing',b.bpm.toFixed(0)+' <small>회/분</small>'+(b.lowConfidence?' <small style="color:var(--bad)">신뢰 낮음</small>':''),(R&&R.quietNote?'조용한 '+R.usedT0.toFixed(0)+'~'+R.usedT1.toFixed(0)+'초만 사용':(b.window?b.window[0].toFixed(0)+'~'+b.window[1].toFixed(0)+'초 구간':'전체 구간'))+({expansion:' · 확장형 신호','translation-lower':' · 배 쪽 신호','translation-upper':' · 가슴 쪽 신호'}[b.signalKind]||'')+(b.lowConfidence&&R&&R.motionDuringWindow!=null?' · 움직임 중('+R.motionDuringWindow.toFixed(0)+' %/s)':'')+'<br>'+(whoTxt[b.who]||'연령 입력 시 WHO 기준 비교')+(b.whoThreshold!=null?' (≥'+b.whoThreshold+'회/분)':''));
+  else { var bt=b.breaths, bT=bt?Math.max(0.1,bt.t1-bt.t0):null, quick=bT!=null&&bT<20;
+    // 계수 표시: 'T초 동안 n회 → ×(60/T) = 계수값' — 보고 숫자는 들숨 간격 평균(구간 양끝 부분 주기 편향 없음). 20초 미만이면 '빠른 추정'(해상도 60/T)
+    var cntTxt=bt?('<b>'+bT.toFixed(0)+'초 동안 들숨 '+bt.n+'회</b> → ×'+(60/bT).toFixed(1)+' = '+bt.countBpm.toFixed(0)+' · 간격 평균 기준 '+b.bpm.toFixed(1)+'회/분'+(quick?' · <span style="color:var(--warn)">빠른 추정('+bT.toFixed(0)+'초, ±'+Math.round(60/bT)+')</span>':'')):('주기 분석(자기상관) 기준'+(b.periodBpm!=null?' '+b.periodBpm.toFixed(1)+'회/분':'')+' — 들숨 피크 계수 불일치로 계수 미표시');
+    setTile('breathing',b.bpm.toFixed(0)+' <small>회/분</small>'+(quick?' <small style="color:var(--warn)">빠른 추정</small>':'')+(b.lowConfidence?' <small style="color:var(--bad)">신뢰 낮음</small>':''),cntTxt+'<br>'+(R&&R.quietNote?'조용한 '+R.usedT0.toFixed(0)+'~'+R.usedT1.toFixed(0)+'초만 사용':(b.window?b.window[0].toFixed(0)+'~'+b.window[1].toFixed(0)+'초 구간':'전체 구간'))+({expansion:' · 확장형 신호','translation-lower':' · 배 쪽 신호','translation-upper':' · 가슴 쪽 신호'}[b.signalKind]||'')+(b.lowConfidence&&R&&R.motionDuringWindow!=null?' · 움직임 중('+R.motionDuringWindow.toFixed(0)+' %/s)':'')+'<br>'+(whoTxt[b.who]||'연령 입력 시 WHO 기준 비교')+(b.whoThreshold!=null?' (≥'+b.whoThreshold+'회/분)':'')); }
   // 순환
   var c=f.circulation;
   var sw=function(o){ return o?('<span class="patSw" style="background:'+labHex(o)+'"></span>'):''; };
@@ -3279,7 +3317,7 @@ function publishMeasurement(s,final){
   var respRes=s.respA?(s.cv?s.cv.finishResp():s.respA.finish()):null;
   if(respRes){
     respRes.observedDuration=elapsed;
-    if(elapsed<12)respRes={status:'unusable',reason:'호흡 신호 수집 중 — 최소 12초 관찰 후 추정을 시도합니다.',observedDuration:elapsed};
+    if(elapsed<10)respRes={status:'unusable',reason:'호흡 신호 수집 중 — 최소 10초 관찰 후 추정을 시도합니다(10~20초는 빠른 추정, 그 뒤 계속 갱신).',observedDuration:elapsed};
     else if(s.tracked){ // 추적 모드: 공백은 분석기가 구간을 끊어 처리(가장 긴 연속 구간 사용). 공백을 뺀 실효 표본율만 검사.
       var effN=s.records.length-1-(s.gapCount||0), effDur=elapsed-(s.gapTotal||0), hzEff=effDur>0?effN/effDur:0;
       if(hzEff<6)respRes=Object.assign({},respRes,{status:'unusable',bpm:null,reason:'표본율 부족: 실효 '+hzEff.toFixed(1)+'Hz (<6Hz; 프레임 공백 '+(s.gapCount||0)+'회 제외). 처리 지연이 큽니다 — 다른 앱을 닫거나 30초 모드로 다시 측정하세요.'});
@@ -3474,7 +3512,8 @@ function showResult(r){
     updateManualDiff(); return;
   }
   if (r.status === 'ok') {
-    head.innerHTML = '<span class="ok">' + r.bpm.toFixed(1) + '</span> <small>회/분 (자동 추정)</small>';
+    var bt = r.breaths;
+    head.innerHTML = '<span class="ok">' + r.bpm.toFixed(1) + '</span> <small>회/분 (' + (r.rateMethod === 'ibi' && bt ? (Math.max(0.1, bt.t1 - bt.t0)).toFixed(0) + '초 동안 들숨 ' + bt.n + '회 → ×' + (60 / Math.max(0.1, bt.t1 - bt.t0)).toFixed(1) + ' = ' + bt.countBpm.toFixed(0) + '; 피크 간격 평균 기준' : '주기 분석 기준') + ')</small>';
     reason.hidden = true;
   } else {
     head.innerHTML = '<span class="bad">분석 불가</span> <small>— 호흡수 0회가 아니라 신호를 판정할 수 없다는 뜻입니다</small>';
@@ -3487,7 +3526,8 @@ function showResult(r){
     ['신호 진폭 RMS', r.rms != null ? fmt(r.rms, 2) + 'px' : '-'],
     ['배경 움직임 RMS', r.bgRms != null ? fmt(r.bgRms, 2) + 'px' : '-'],
     ['추정 사용 구간', r.status === 'ok' ? (r.windowT0 != null ? r.windowT0.toFixed(0) + '~' + r.windowT1.toFixed(0) + '초 (안정 구간, 파형에 음영 표시)' : '전체 구간') : '-'],
-    ['자기상관 피크', r.acfPeak != null ? fmt(r.acfPeak, 2) + ' (주기성 지표, 임상 신뢰도 아님)' : '-'],
+    ['들숨 계수(파형의 ● 표시)', r.breaths ? (r.breaths.n + '회 / ' + (r.breaths.t1 - r.breaths.t0).toFixed(1) + '초 (' + (r.breaths.scope === 'window' ? '안정 구간' : '사용 구간 전체') + ') → 단순 계수 ' + r.breaths.countBpm.toFixed(1) + '회/분, 간격 평균 ' + r.bpm.toFixed(1) + '회/분') : (r.status === 'ok' ? '피크 계수가 주기 분석과 30% 넘게 달라 미표시 — 주기 분석값 보고' : '-')],
+    ['주기 분석(자기상관)', r.periodBpm != null ? fmt(r.periodBpm, 1) + '회/분 · 피크 ' + (r.acfPeak != null ? fmt(r.acfPeak, 2) : '-') + ' (주기성 지표, 임상 신뢰도 아님)' : (r.acfPeak != null ? '피크 ' + fmt(r.acfPeak, 2) : '-')],
     ['피크 계수 교차검증', r.peakCountBpm != null ? fmt(r.peakCountBpm, 1) + '회/분' : '-']
   ];
   list.innerHTML = rows.map(function(x){ return '<dt>' + x[0] + '</dt><dd>' + x[1] + '</dd>'; }).join('');
@@ -3532,6 +3572,12 @@ function drawWave(wf){
   c.beginPath();
   for (var j = 0; j < n; j++){ var px = X(xs[j]), py = Y(ys[j]); if (j === 0) c.moveTo(px, py); else c.lineTo(px, py); }
   c.stroke();
+  // 들숨 피크(계수에 쓴 것) 표시 — 평가자가 영상·육안 계수와 대조할 수 있게
+  if (lastResult && lastResult.breaths && lastResult.breaths.peaksT && lastResult.breaths.peaksT.length) {
+    var rr = 3.5 * (window.devicePixelRatio || 1); c.fillStyle = css.getPropertyValue('--bad').trim() || '#c33';
+    lastResult.breaths.peaksT.forEach(function(tp){ var k = 0, bd = Infinity; for (var q = 0; q < n; q++){ var dd = Math.abs(xs[q] - tp); if (dd < bd){ bd = dd; k = q; } } c.beginPath(); c.arc(X(xs[k]), Y(ys[k]), rr, 0, Math.PI * 2); c.fill(); });
+    c.fillStyle = css.getPropertyValue('--muted').trim() || '#777'; c.fillText('● 들숨 ' + lastResult.breaths.n + '회', padL + 4, padT + 10);
+  }
 }
 
 /* ---------- 범용 시계열(결측 = 선 끊김) ---------- */
@@ -3757,7 +3803,7 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
   });
   var ap=lastRun&&lastRun.appearRes;
   if(ap) lines.push('# appearance(측정값만, 판정 아님): '+JSON.stringify(ap.status==='ok'?{faceRatio:ap.faceRatio,eyeOpenMean:ap.eyeOpenMean,eyeOpenRatio:ap.eyeOpenRatio,gazeCenterRatio:ap.gazeCenterRatio,gazeOffsetMean:ap.gazeOffsetMean,jawOpenMean:ap.jawOpenMean,frownMean:ap.frownMean,browInnerUpMean:ap.browInnerUpMean,smileMean:ap.smileMean,config:ap.config}:{status:ap.status,reason:ap.reason}));
-  if(respRes&&respRes.tracked) lines.push('# resp_tracking: '+JSON.stringify({tracked:true,status:respRes.status,signalKind:respRes.signalKind||null,lowConfidence:!!respRes.lowConfidence,motionDuringWindow:respRes.motionDuringWindow!=null?+respRes.motionDuringWindow.toFixed(1):null,acfPeak:respRes.acfPeak!=null?+respRes.acfPeak.toFixed(2):null,candidate:respRes.candidate||null,usedT0:respRes.usedT0!=null?+respRes.usedT0.toFixed(2):null,usedT1:respRes.usedT1!=null?+respRes.usedT1.toFixed(2):null,segments:respRes.segments||null,roiBreaks:respRes.roiBreaks,sampleCount:respRes.sampleCount,quietNote:respRes.quietNote||null,movementHigh:!!respRes.movementHigh,candidates:respRes.candidates||null,reanchors:respRes.reanchors,noWindow:respRes.noWindow,winJumps:respRes.winJumps,gaps:respRes.gaps,pairs:respRes.pairs,invalid:respRes.invalid,lowTexture:respRes.lowTexture,sideUsed:respRes.sideUsed,sideMissing:respRes.sideMissing,divAvail:respRes.divAvail,snr:respRes.snr,camCorr:respRes.camCorr,camRms:respRes.bgRms,alt:respRes.altResult||(respRes.altReason?{reason:respRes.altReason}:null)}));
+  if(respRes&&respRes.tracked) lines.push('# resp_tracking: '+JSON.stringify({tracked:true,status:respRes.status,signalKind:respRes.signalKind||null,rateMethod:respRes.rateMethod||null,periodBpm:respRes.periodBpm!=null?+respRes.periodBpm.toFixed(1):null,breaths:respRes.breaths?{n:respRes.breaths.n,t0:+respRes.breaths.t0.toFixed(1),t1:+respRes.breaths.t1.toFixed(1),scope:respRes.breaths.scope,countBpm:+respRes.breaths.countBpm.toFixed(1),peaksT:respRes.breaths.peaksT}:null,lowConfidence:!!respRes.lowConfidence,motionDuringWindow:respRes.motionDuringWindow!=null?+respRes.motionDuringWindow.toFixed(1):null,acfPeak:respRes.acfPeak!=null?+respRes.acfPeak.toFixed(2):null,candidate:respRes.candidate||null,usedT0:respRes.usedT0!=null?+respRes.usedT0.toFixed(2):null,usedT1:respRes.usedT1!=null?+respRes.usedT1.toFixed(2):null,segments:respRes.segments||null,roiBreaks:respRes.roiBreaks,sampleCount:respRes.sampleCount,quietNote:respRes.quietNote||null,movementHigh:!!respRes.movementHigh,candidates:respRes.candidates||null,reanchors:respRes.reanchors,noWindow:respRes.noWindow,winJumps:respRes.winJumps,gaps:respRes.gaps,pairs:respRes.pairs,invalid:respRes.invalid,lowTexture:respRes.lowTexture,sideUsed:respRes.sideUsed,sideMissing:respRes.sideMissing,divAvail:respRes.divAvail,snr:respRes.snr,camCorr:respRes.camCorr,camRms:respRes.bgRms,alt:respRes.altResult||(respRes.altReason?{reason:respRes.altReason}:null)}));
   if(lastRun&&lastRun.meta&&lastRun.meta.exposureSteps) lines.push('# exposure_adjust(자동 노출 보정, EV): '+JSON.stringify(lastRun.meta.exposureSteps));
   if (lastRun && lastRun.meta && lastRun.meta.diagnostics && lastRun.meta.diagnostics.faceEngine) lines.push('# face_engine: ' + JSON.stringify({ engine: lastRun.meta.diagnostics.faceEngine, switched: lastRun.meta.diagnostics.faceEngineSwitch, probes: lastRun.meta.faceProbes || null, probeEngineErrors: lastRun.meta.diagnostics.probeEngineErrors }));
   (function(){ var c={mp:0,'mp-crop':0,pose:0,none:0,mismatch:0,poseSkipped:0}; records.forEach(function(r){ if(r.faceSrc) c[r.faceSrc]=(c[r.faceSrc]||0)+1; if(r.poseSkip) c.poseSkipped++; }); if(records.length) lines.push('# face_src(프레임 수; mp=얼굴 모델 전체 프레임, mp-crop=자세 모델이 가리킨 얼굴 영역을 잘라 재검출, pose=자세 모델 대체(품질 낮음), none=미검출; poseSkipped=과부하로 자세 추론 생략): '+JSON.stringify(c)); })();
