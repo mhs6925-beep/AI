@@ -2,7 +2,7 @@
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PAT 삼각형 영상 평가 v12.13</title>
+<title>PAT 삼각형 영상 평가 v12.14</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* 레이아웃: 단일 컬럼 단계형(①~⑦) 도구 페이지, 폰 우선 */
@@ -124,7 +124,7 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
 
 <main>
   <header>
-    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.13 · 연구용</span></h1>
+    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.14 · 연구용</span></h1>
     <p class="sub">휴대폰 한 대로 소아평가삼각형(PAT)의 세 축 — 호흡·외관·피부순환 — 을 객관적 수치로 기록합니다. 손에 들고 한 번 촬영하면 얼굴·몸을 자동으로 따라가며 측정합니다. 측정값만 제공하며 정상/이상 판정은 하지 않습니다.</p>
   </header>
 
@@ -883,209 +883,228 @@ function createAnalyzer(w, h, roi, userCfg) {
       }
     }
     if (times.length < 3) return fail('프레임 부족' + noWinNote);
-    // 조용한 구간 우선: 프레임별 몸 움직임(1초 이동 중앙값)이 quietMotionMax 이하인 가장 긴 연속 구간이 quietMinSec 이상이면 그 구간만 분석
-    let quietNote = null, movementHigh = false, motionMeanAll = null;
+    // 조용한 구간 우선: 프레임별 몸 움직임(1초 이동 중앙값)이 quietMotionMax 이하인 연속 구간 중 quietMinSec 이상인 것을
+    // 모두 후보로 두고 각각 같은 게이트로 분석한다(v12.14; 전에는 가장 긴 구간 하나만). 채택: ok 중 주기성(acfPeak) 최대(0.05 이내면 긴 쪽).
+    // 모두 불가면 가장 긴 구간의 결과를 보고하고, 시도한 구간 목록(quietTried)을 남긴다. 기준값은 바꾸지 않는다.
+    const full = { times, roiShift, bgShiftArr, sideArr, divArr, upArr, lowArr, motionArr };
+    const rawAllOf = () => ({ t: full.times.slice(), pos: cum(full.roiShift), div: full.divArr.length === full.roiShift.length ? cum(full.divArr) : null });
+    const setRange = (a, b) => { times = full.times.slice(a, b); roiShift = full.roiShift.slice(a, b); bgShiftArr = full.bgShiftArr.slice(a, b); sideArr = full.sideArr.slice(a, b); divArr = full.divArr.slice(a, b); upArr = full.upArr.slice(a, b); lowArr = full.lowArr.slice(a, b); motionArr = full.motionArr.slice(a, b); };
+    let movementHigh = false, motionMeanAll = null;
+    const stretches = [];
     {
-      const mv = motionArr.filter(v => v != null);
-      if (mv.length >= 0.5 * motionArr.length && mv.length >= 10) {
+      const mv = full.motionArr.filter(v => v != null);
+      if (mv.length >= 0.5 * full.motionArr.length && mv.length >= 10) {
         motionMeanAll = mean(mv);
-        const sm = motionArr.map((v, i) => { const w = []; for (let j = i - 4; j <= i + 4; j++) if (j >= 0 && j < motionArr.length && motionArr[j] != null) w.push(motionArr[j]); return w.length ? median(w) : null; });
+        const sm = full.motionArr.map((v, i) => { const w = []; for (let j = i - 4; j <= i + 4; j++) if (j >= 0 && j < full.motionArr.length && full.motionArr[j] != null) w.push(full.motionArr[j]); return w.length ? median(w) : null; });
         const quiet = sm.map(v => v == null || v <= cfg.quietMotionMax);
-        let best = null, s0 = 0;
+        let s0 = 0;
         for (let i = 1; i <= quiet.length; i++) {
-          if (i === quiet.length || !quiet[i] || times[i] - times[i - 1] > cfg.maxGapSec) {
-            if (quiet[s0] && i - s0 >= 3) { const cand = [s0, i]; if (!best || times[cand[1] - 1] - times[cand[0]] > times[best[1] - 1] - times[best[0]]) best = cand; }
+          if (i === quiet.length || !quiet[i] || full.times[i] - full.times[i - 1] > cfg.maxGapSec) {
+            if (quiet[s0] && i - s0 >= 3) { const dur = full.times[i - 1] - full.times[s0]; if (dur >= cfg.quietMinSec) stretches.push([s0, i, dur]); }
             s0 = i; while (s0 < quiet.length && !quiet[s0]) s0++; i = s0;
           }
         }
-        const quietDur = best ? times[best[1] - 1] - times[best[0]] : 0;
-        if (best && quietDur >= cfg.quietMinSec && best[1] - best[0] < times.length) {
-          times = times.slice(best[0], best[1]); roiShift = roiShift.slice(best[0], best[1]); bgShiftArr = bgShiftArr.slice(best[0], best[1]); sideArr = sideArr.slice(best[0], best[1]); divArr = divArr.slice(best[0], best[1]); upArr = upArr.slice(best[0], best[1]); lowArr = lowArr.slice(best[0], best[1]); motionArr = motionArr.slice(best[0], best[1]);
-          quietNote = `몸 움직임이 적은 ${times[0].toFixed(1)}~${times[times.length - 1].toFixed(1)}초 구간만 사용 (≤${cfg.quietMotionMax} %/s; 전체 평균 ${motionMeanAll.toFixed(0)} %/s)`;
-        } else if (motionMeanAll > cfg.quietMotionMax) movementHigh = true;
+        stretches.sort((a, b) => b[2] - a[2]);
+        if (!stretches.length && motionMeanAll > cfg.quietMotionMax) movementHigh = true;
       }
     }
-    const duration = times[times.length - 1] - times[0];
-    if (duration < cfg.minDurationSec) return fail(`연속 구간이 짧음 (${duration.toFixed(1)}초 < 최소 ${cfg.minDurationSec}초${gaps ? `; 프레임 공백 ${gaps}회` : ''})` + noWinNote + (invalid - noWindow > pairs * 0.5 ? ` — 유효 쌍 ${pairs - invalid}/${pairs}${lowTexture > invalid * 0.5 ? ' (창 질감 부족)' : ''}` : ''));
+    const analyzeCurrent = (quietNote) => {
+      const duration = times[times.length - 1] - times[0];
+      if (duration < cfg.minDurationSec) return fail(`연속 구간이 짧음 (${duration.toFixed(1)}초 < 최소 ${cfg.minDurationSec}초${gaps ? `; 프레임 공백 ${gaps}회` : ''})` + noWinNote + (invalid - noWindow > pairs * 0.5 ? ` — 유효 쌍 ${pairs - invalid}/${pairs}${lowTexture > invalid * 0.5 ? ' (창 질감 부족)' : ''}` : ''));
 
-    const validRatio = 1 - invalid / Math.max(1, pairs);
-    // 유효 비율: 고정 모드는 전체 프레임 기준. 추적 모드는 '선택된 연속 구간' 안에서 센다 — 구간 밖(몸이 안 보이던 시간)의
-    // 창 없는 프레임은 이미 구간 분리로 제외됐으므로 전체 비율로 다시 벌하지 않는다(기준값 0.7은 그대로).
-    let segValidRatio = null;
-    if (tracked) {
-      const spanAll = (firstT != null && lastT != null) ? lastT - firstT : 0; // 들어온 모든 프레임의 시간 폭(창 없는 프레임 포함)
-      const fsNominal = (nFrames > 1 && spanAll > 0) ? (nFrames - 1) / spanAll : cfg.resampleFs;
-      const expected = Math.max(1, Math.round(duration * fsNominal) + 1);
-      segValidRatio = Math.min(1, times.length / expected);
-    }
-    const ratioUsed = tracked ? segValidRatio : validRatio;
-    if (ratioUsed < cfg.minValidRatio) {
-      return fail(`유효 프레임 부족 (${(ratioUsed * 100).toFixed(0)}% < ${cfg.minValidRatio * 100}%${tracked ? `; ${times[0].toFixed(1)}~${times[times.length - 1].toFixed(1)}초 구간 기준` : ''})` +
-        (lowTexture > invalid * 0.5 ? ' — ROI 질감(명암 변화) 부족' : '') + noWinNote, { validRatio, segValidRatio });
-    }
-
-    // 배경(카메라) 위치 신호 — 두 신호 종류에 공통
-    const bgPos = new Float32Array(bgShiftArr.length);
-    { let accB = 0; for (let i = 0; i < bgShiftArr.length; i++) { accB += bgShiftArr[i]; bgPos[i] = accB; } }
-    const uniBg = resampleUniform(times, bgPos, cfg.resampleFs);
-    const bgSig = detrend(uniBg.x, cfg.resampleFs, cfg.detrendWinSec);
-    const bgRms = std(bgSig);
-
-    /* 한 종류의 변위 신호(이동형 또는 확장형)에 전체 판정 파이프라인을 적용 */
-    function evalSignal(shiftArr, kind) {
-      const pos = new Float32Array(shiftArr.length);
-      { let acc = 0; for (let i = 0; i < shiftArr.length; i++) { acc += (shiftArr[i] != null ? shiftArr[i] : 0); pos[i] = acc; } }
-      let sideApplied = false, sideNoise = null;
-      if (kind === 'translation' && tracked && sideArr.length === shiftArr.length && sideUsed >= 0.5 * Math.max(1, sideUsed + sideMissing)) {
-        // 추적 모드 보조 배경: 스트립 누적 변위를 중심 이동평균(≈0.7초)으로 저역통과한 뒤 창 위치에서 뺀다 — 손떨림 보정 잔차 제거
-        const sPos = new Float32Array(sideArr.length); let accS = 0;
-        for (let i = 0; i < sideArr.length; i++) { accS += (sideArr[i] != null ? sideArr[i] : 0); sPos[i] = accS; }
-        const half = 3, sm = new Float32Array(sPos.length);
-        for (let i = 0; i < sPos.length; i++) { let s = 0, n = 0; for (let j = Math.max(0, i - half); j <= Math.min(sPos.length - 1, i + half); j++) { s += sPos[j]; n++; } sm[i] = s / n; }
-        for (let i = 0; i < pos.length; i++) pos[i] -= sm[i];
-        sideApplied = true;
-        let s2 = 0; for (let i = 0; i < sPos.length; i++) { const d = sPos[i] - sm[i]; s2 += d * d; } sideNoise = Math.sqrt(s2 / sPos.length);
+      const validRatio = 1 - invalid / Math.max(1, pairs);
+      // 유효 비율: 고정 모드는 전체 프레임 기준. 추적 모드는 '선택된 연속 구간' 안에서 센다 — 구간 밖(몸이 안 보이던 시간)의
+      // 창 없는 프레임은 이미 구간 분리로 제외됐으므로 전체 비율로 다시 벌하지 않는다(기준값 0.7은 그대로).
+      let segValidRatio = null;
+      if (tracked) {
+        const spanAll = (firstT != null && lastT != null) ? lastT - firstT : 0; // 들어온 모든 프레임의 시간 폭(창 없는 프레임 포함)
+        const fsNominal = (nFrames > 1 && spanAll > 0) ? (nFrames - 1) / spanAll : cfg.resampleFs;
+        const expected = Math.max(1, Math.round(duration * fsNominal) + 1);
+        segValidRatio = Math.min(1, times.length / expected);
       }
-      const uni = resampleUniform(times, pos, cfg.resampleFs);
-      const sig = detrend(uni.x, cfg.resampleFs, cfg.detrendWinSec);
-      const rms = std(sig);
-      const wave = { t: Array.from(uni.t), x: Array.from(sig) };
-      const bad = (reason, extra) => Object.assign({ status: 'unusable', kind, reason, waveform: wave, duration, rms, bgRms, validRatio, sideApplied, sideNoise }, extra || {});
+      const ratioUsed = tracked ? segValidRatio : validRatio;
+      if (ratioUsed < cfg.minValidRatio) {
+        return fail(`유효 프레임 부족 (${(ratioUsed * 100).toFixed(0)}% < ${cfg.minValidRatio * 100}%${tracked ? `; ${times[0].toFixed(1)}~${times[times.length - 1].toFixed(1)}초 구간 기준` : ''})` +
+          (lowTexture > invalid * 0.5 ? ' — ROI 질감(명암 변화) 부족' : '') + noWinNote, { validRatio, segValidRatio });
+      }
 
-      // 카메라 흔들림 검사(고정 모드): 배경 움직임이 뚜렷한데 보정 후 잔여 ROI 신호가 그에 비해 미미하면 보정 잔차로 본다
-      if (!tracked && kind === 'translation' && bgRms > cfg.shakeMinPx && rms < cfg.shakeResidualRatio * bgRms)
-        return bad(`카메라 흔들림 우세 (배경 움직임 RMS ${bgRms.toFixed(2)}px, 잔여 ROI 신호 ${rms.toFixed(2)}px) — 고정 촬영 필요, 무호흡 판정 아님`);
-      // 추적 모드(이동형): 잔여 신호가 카메라 수직 움직임과 강하게 상관되면 보정 잔차가 만든 가짜 주기로 보고 기각
-      let camCorr = null;
-      if (tracked && kind === 'translation' && bgRms > cfg.shakeMinPx && sig.length === bgSig.length && sig.length > 10) {
-        let sxy = 0, sxx = 0, syy = 0; const mx = mean(sig), my = mean(bgSig);
-        for (let i = 0; i < sig.length; i++) { const a = sig[i] - mx, b = bgSig[i] - my; sxy += a * b; sxx += a * a; syy += b * b; }
-        camCorr = (sxx > 0 && syy > 0) ? sxy / Math.sqrt(sxx * syy) : 0;
-        if (Math.abs(camCorr) >= cfg.trackedCamCorrMax)
-          return bad(`카메라 움직임과 상관 높음 (r=${camCorr.toFixed(2)} ≥ ${cfg.trackedCamCorrMax}; 카메라 수직 RMS ${bgRms.toFixed(2)}px) — 손떨림 보정 잔차일 가능성, 무호흡 판정 아님`, { camCorr });
-      }
-      if (tracked && bgRms > cfg.trackedCamMaxRms)
-        return bad(`카메라 움직임 과다 (보정 전 수직 RMS ${bgRms.toFixed(2)}px > 개발용 한계 ${cfg.trackedCamMaxRms}px) — 휴대폰을 더 안정적으로 잡으세요, 무호흡 판정 아님`);
-      if (rms < cfg.minAmplitudePx)
-        return bad(`움직임 신호 미검출 (RMS ${rms.toFixed(3)}px < 개발용 임계 ${cfg.minAmplitudePx}px) — 무호흡 판정 아님`, { bgNote: bgUsable ? null : '배경 보정 불가 — 고정 촬영 조건에서만 시험' });
-      // 추적 모드 SNR 검사: 프레임 간 잡음(1차 차분 std/√2) 대비 신호 std
-      let snr = null;
-      if (tracked && sig.length > 10) {
-        const d = []; for (let i = 1; i < sig.length; i++) d.push(sig[i] - sig[i - 1]);
-        const sigma = std(d) / Math.SQRT2; snr = sigma > 0 ? rms / sigma : Infinity;
-        const minSnr = kind === 'expansion' ? cfg.trackedMinSnrExp : cfg.trackedMinSnr;
-        if (snr < minSnr) return bad(`신호 대 잡음 비 부족 (${snr.toFixed(2)} < 개발용 임계 ${minSnr}; RMS ${rms.toFixed(2)}px) — 손떨림 잔차·잡음 수준, 무호흡 판정 아님`, { snr });
-      }
-      // 1차: 전체 구간 자기상관(피크 계수법을 기본주기 선택 힌트로 사용). 불명확·불일치면 2차: 안정 구간(winSec 창) 탐색.
-      const pkFull = peakCountRate(sig, cfg.resampleFs, cfg);
-      const acFull = autocorrRate(sig, cfg.resampleFs, cfg, pkFull);
-      const fullConsistent = acFull.ok && (pkFull == null || Math.abs(pkFull - acFull.bpm) / acFull.bpm <= cfg.rrMismatchMax);
-      const fullOk = acFull.ok && acFull.peak >= cfg.minAcfPeak && fullConsistent;
-      let bpm, acfPeak, winT0 = null, winT1 = null, rateSeg = sig;
-      if (fullOk) { bpm = acFull.bpm; acfPeak = acFull.peak; }
-      else {
-        const bw = bestWindowRate(sig, cfg.resampleFs, cfg);
-        if (!bw) {
-          let maxAbs = 0; for (let i = 0; i < sig.length; i++) { const a = Math.abs(sig[i]); if (a > maxAbs) maxAbs = a; }
-          const spikeHint = maxAbs > 5 * rms ? ` — 큰 움직임 스파이크 감지(최대 ${maxAbs.toFixed(1)}px): 휴대폰과 피사체를 고정하고 움직임 없는 20~30초를 재촬영하세요` : '';
-          const fullDesc = !acFull.ok ? acFull.reason
-            : !fullConsistent ? `두 계산법 불일치: 자기상관 ${acFull.bpm.toFixed(0)} vs 피크 계수 ${pkFull.toFixed(0)}회/분`
-            : `전체 자기상관 피크 ${acFull.peak.toFixed(2)} < 개발용 임계 ${cfg.minAcfPeak}`;
-          return bad(`반복 주기 불명확 (${fullDesc}; ${cfg.winSec}초 안정 구간 탐색에서도 미확인)${spikeHint} — 무호흡 판정 아님`, { snr, camCorr });
+      // 배경(카메라) 위치 신호 — 두 신호 종류에 공통
+      const bgPos = new Float32Array(bgShiftArr.length);
+      { let accB = 0; for (let i = 0; i < bgShiftArr.length; i++) { accB += bgShiftArr[i]; bgPos[i] = accB; } }
+      const uniBg = resampleUniform(times, bgPos, cfg.resampleFs);
+      const bgSig = detrend(uniBg.x, cfg.resampleFs, cfg.detrendWinSec);
+      const bgRms = std(bgSig);
+
+      /* 한 종류의 변위 신호(이동형 또는 확장형)에 전체 판정 파이프라인을 적용 */
+      function evalSignal(shiftArr, kind) {
+        const pos = new Float32Array(shiftArr.length);
+        { let acc = 0; for (let i = 0; i < shiftArr.length; i++) { acc += (shiftArr[i] != null ? shiftArr[i] : 0); pos[i] = acc; } }
+        let sideApplied = false, sideNoise = null;
+        if (kind === 'translation' && tracked && sideArr.length === shiftArr.length && sideUsed >= 0.5 * Math.max(1, sideUsed + sideMissing)) {
+          // 추적 모드 보조 배경: 스트립 누적 변위를 중심 이동평균(≈0.7초)으로 저역통과한 뒤 창 위치에서 뺀다 — 손떨림 보정 잔차 제거
+          const sPos = new Float32Array(sideArr.length); let accS = 0;
+          for (let i = 0; i < sideArr.length; i++) { accS += (sideArr[i] != null ? sideArr[i] : 0); sPos[i] = accS; }
+          const half = 3, sm = new Float32Array(sPos.length);
+          for (let i = 0; i < sPos.length; i++) { let s = 0, n = 0; for (let j = Math.max(0, i - half); j <= Math.min(sPos.length - 1, i + half); j++) { s += sPos[j]; n++; } sm[i] = s / n; }
+          for (let i = 0; i < pos.length; i++) pos[i] -= sm[i];
+          sideApplied = true;
+          let s2 = 0; for (let i = 0; i < sPos.length; i++) { const d = sPos[i] - sm[i]; s2 += d * d; } sideNoise = Math.sqrt(s2 / sPos.length);
         }
-        bpm = bw.bpm; acfPeak = bw.peak;
-        winT0 = uni.t[bw.s0]; winT1 = uni.t[Math.min(bw.s1, uni.t.length) - 1];
-        rateSeg = sig.subarray ? sig.subarray(bw.s0, bw.s1) : sig.slice(bw.s0, bw.s1);
-      }
-      const pkRate = peakCountRate(rateSeg, cfg.resampleFs, cfg);
-      const mismatch = (pkRate != null && bpm > 0) ? Math.abs(pkRate - bpm) / bpm : null;
-      if (mismatch != null && mismatch > cfg.rrMismatchMax)
-        return bad(`두 계산법 불일치 (자기상관 ${bpm.toFixed(0)} vs 피크 계수 ${pkRate.toFixed(0)}회/분, ${(mismatch * 100).toFixed(0)}% > 개발용 임계 ${cfg.rrMismatchMax * 100}%) — 무호흡 판정 아님`, { snr, camCorr });
-      // 보고 호흡수: 들숨 피크 간격 기반(사람이 세는 방식). 불규칙 호흡에서 자기상관 주기(평균 오차 1.5·최대 8회/분, 합성)보다 정확(0.2·최대 1).
-      // 전체 사용 구간의 피크 간격이 자기상관 주기와 30% 안이면 채택, 아니면 안정 창 안의 피크만으로 재시도, 그래도 아니면 자기상관 주기를 보고(rateMethod='acf').
-      const periodBpm = bpm;
-      const pkIdx = findBreathPeaks(sig, cfg.resampleFs, cfg), pkT = pkIdx.map(i => uni.t[i]);
-      const ibiOf = (ts) => ts.length >= 3 ? 60 * (ts.length - 1) / (ts[ts.length - 1] - ts[0]) : null;
-      let breaths = null, rateMethod = 'acf';
-      const tryScope = (ts, scope, t0s, t1s) => { const v = ibiOf(ts); if (v != null && Math.abs(v - periodBpm) / periodBpm <= cfg.rrMismatchMax) { breaths = { n: ts.length, t0: t0s, t1: t1s, scope, peaksT: ts.map(v2 => +v2.toFixed(2)), countBpm: ts.length * 60 / Math.max(1e-6, t1s - t0s), ibiBpm: v }; rateMethod = 'ibi'; return true; } return false; };
-      if (!tryScope(pkT, 'full', uni.t[0], uni.t[uni.t.length - 1]) && winT0 != null) tryScope(pkT.filter(t => t >= winT0 && t <= winT1), 'window', winT0, winT1);
-      if (rateMethod === 'ibi') bpm = breaths.ibiBpm;
-      return { status: 'ok', kind, bpm, periodBpm, rateMethod, breaths, acfPeak, windowT0: winT0, windowT1: winT1, peakCountBpm: pkRate, waveform: wave, duration, rms, bgRms, validRatio, sideApplied, sideNoise, snr, camCorr, pos: Array.from(pos) };
-    }
+        const uni = resampleUniform(times, pos, cfg.resampleFs);
+        const sig = detrend(uni.x, cfg.resampleFs, cfg.detrendWinSec);
+        const rms = std(sig);
+        const wave = { t: Array.from(uni.t), x: Array.from(sig) };
+        const bad = (reason, extra) => Object.assign({ status: 'unusable', kind, reason, waveform: wave, duration, rms, bgRms, validRatio, sideApplied, sideNoise }, extra || {});
 
-    // 이동형(행 프로파일 수직 변위) — 기본. 확장형(창 상·하 절반의 반대 방향 변위) — 위에서 내려다본 촬영에서 가슴이 카메라 쪽으로
-    // 부풀 때 영상에서는 수직 이동이 아니라 중심에서 바깥으로 벌어지는 확장으로 보이므로, 그 성분을 따로 잰다.
-    // 후보 신호: 이동형(창 전체) · 이동형-위(가슴) · 이동형-아래(배) · 확장형(위·아래 반대 변위). 각각 같은 게이트를 통과해야 한다.
-    const transRes = evalSignal(roiShift, 'translation');
-    const avail = (arr) => arr.length === roiShift.length && arr.filter(v => v != null).length >= 0.7 * roiShift.length;
-    const divRes = avail(divArr) ? evalSignal(divArr, 'expansion') : null;
-    const upRes = avail(upArr) ? evalSignal(upArr, 'translation-upper') : null;
-    const lowRes = avail(lowArr) ? evalSignal(lowArr, 'translation-lower') : null;
-    // 채택 후보는 이동형(전체)·확장형 둘뿐. 위/아래 절반 이동형은 손떨림 잔차에 취약해(합성 시험에서 18~19회/분 가짜 발생) 진단 목록에만 싣는다.
-    const all = [transRes, upRes, lowRes, divRes].filter(Boolean);
-    const selectable = [transRes, divRes].filter(Boolean);
-    const okList = selectable.filter(r => r.status === 'ok').sort((a, b) => b.acfPeak - a.acfPeak);
-    const KIND_KO = { translation: '이동형', 'translation-upper': '이동형(가슴)', 'translation-lower': '이동형(배)', expansion: '확장형' };
-    const candSummary = all.map(r => ({ kind: r.kind, status: r.status, bpm: r.status === 'ok' ? +r.bpm.toFixed(1) : null, acfPeak: r.status === 'ok' ? +r.acfPeak.toFixed(2) : null, reason: r.status === 'ok' ? null : r.reason }));
-    let chosen = null, disagreeNote = null;
-    if (okList.length) {
-      const best = okList[0];
-      // best와 30% 넘게 다른 후보 중 주기성이 강한(≥ strongAcf) 것이 있으면 어느 쪽도 믿을 수 없음
-      const strong = cfg.strongAcfPeak;
-      const rivals = okList.slice(1).filter(r => Math.abs(r.bpm - best.bpm) / Math.max(r.bpm, best.bpm) > cfg.rrMismatchMax);
-      const strongRivals = rivals.filter(r => r.acfPeak >= strong);
-      if (strongRivals.length || (rivals.length && best.acfPeak < strong)) {
-        const desc = okList.map(r => `${KIND_KO[r.kind] || r.kind} ${r.bpm.toFixed(0)}(주기성 ${r.acfPeak.toFixed(2)})`).join(' · ');
-        return fail(`후보 신호 불일치: ${desc} — 피사체 움직임·잡음으로 주기를 특정할 수 없음, 무호흡 판정 아님`, {
-          kind: best.kind, waveform: best.waveform, waveformAlt: (okList[1] || all.find(r => r !== best) || {}).waveform || null, duration, rms: best.rms, bgRms, validRatio, snr: best.snr, camCorr: best.camCorr,
-          candidates: candSummary, candidate: { kind: best.kind, bpm: best.bpm, acfPeak: best.acfPeak }, altResult: okList[1] ? { kind: okList[1].kind, status: 'ok', bpm: okList[1].bpm, acfPeak: okList[1].acfPeak } : null,
-          sideApplied: best.sideApplied, sideNoise: best.sideNoise, quietNote, movementHigh, motionMeanAll,
+        // 카메라 흔들림 검사(고정 모드): 배경 움직임이 뚜렷한데 보정 후 잔여 ROI 신호가 그에 비해 미미하면 보정 잔차로 본다
+        if (!tracked && kind === 'translation' && bgRms > cfg.shakeMinPx && rms < cfg.shakeResidualRatio * bgRms)
+          return bad(`카메라 흔들림 우세 (배경 움직임 RMS ${bgRms.toFixed(2)}px, 잔여 ROI 신호 ${rms.toFixed(2)}px) — 고정 촬영 필요, 무호흡 판정 아님`);
+        // 추적 모드(이동형): 잔여 신호가 카메라 수직 움직임과 강하게 상관되면 보정 잔차가 만든 가짜 주기로 보고 기각
+        let camCorr = null;
+        if (tracked && kind === 'translation' && bgRms > cfg.shakeMinPx && sig.length === bgSig.length && sig.length > 10) {
+          let sxy = 0, sxx = 0, syy = 0; const mx = mean(sig), my = mean(bgSig);
+          for (let i = 0; i < sig.length; i++) { const a = sig[i] - mx, b = bgSig[i] - my; sxy += a * b; sxx += a * a; syy += b * b; }
+          camCorr = (sxx > 0 && syy > 0) ? sxy / Math.sqrt(sxx * syy) : 0;
+          if (Math.abs(camCorr) >= cfg.trackedCamCorrMax)
+            return bad(`카메라 움직임과 상관 높음 (r=${camCorr.toFixed(2)} ≥ ${cfg.trackedCamCorrMax}; 카메라 수직 RMS ${bgRms.toFixed(2)}px) — 손떨림 보정 잔차일 가능성, 무호흡 판정 아님`, { camCorr });
+        }
+        if (tracked && bgRms > cfg.trackedCamMaxRms)
+          return bad(`카메라 움직임 과다 (보정 전 수직 RMS ${bgRms.toFixed(2)}px > 개발용 한계 ${cfg.trackedCamMaxRms}px) — 휴대폰을 더 안정적으로 잡으세요, 무호흡 판정 아님`);
+        if (rms < cfg.minAmplitudePx)
+          return bad(`움직임 신호 미검출 (RMS ${rms.toFixed(3)}px < 개발용 임계 ${cfg.minAmplitudePx}px) — 무호흡 판정 아님`, { bgNote: bgUsable ? null : '배경 보정 불가 — 고정 촬영 조건에서만 시험' });
+        // 추적 모드 SNR 검사: 프레임 간 잡음(1차 차분 std/√2) 대비 신호 std
+        let snr = null;
+        if (tracked && sig.length > 10) {
+          const d = []; for (let i = 1; i < sig.length; i++) d.push(sig[i] - sig[i - 1]);
+          const sigma = std(d) / Math.SQRT2; snr = sigma > 0 ? rms / sigma : Infinity;
+          const minSnr = kind === 'expansion' ? cfg.trackedMinSnrExp : cfg.trackedMinSnr;
+          if (snr < minSnr) return bad(`신호 대 잡음 비 부족 (${snr.toFixed(2)} < 개발용 임계 ${minSnr}; RMS ${rms.toFixed(2)}px) — 손떨림 잔차·잡음 수준, 무호흡 판정 아님`, { snr });
+        }
+        // 1차: 전체 구간 자기상관(피크 계수법을 기본주기 선택 힌트로 사용). 불명확·불일치면 2차: 안정 구간(winSec 창) 탐색.
+        const pkFull = peakCountRate(sig, cfg.resampleFs, cfg);
+        const acFull = autocorrRate(sig, cfg.resampleFs, cfg, pkFull);
+        const fullConsistent = acFull.ok && (pkFull == null || Math.abs(pkFull - acFull.bpm) / acFull.bpm <= cfg.rrMismatchMax);
+        const fullOk = acFull.ok && acFull.peak >= cfg.minAcfPeak && fullConsistent;
+        let bpm, acfPeak, winT0 = null, winT1 = null, rateSeg = sig;
+        if (fullOk) { bpm = acFull.bpm; acfPeak = acFull.peak; }
+        else {
+          const bw = bestWindowRate(sig, cfg.resampleFs, cfg);
+          if (!bw) {
+            let maxAbs = 0; for (let i = 0; i < sig.length; i++) { const a = Math.abs(sig[i]); if (a > maxAbs) maxAbs = a; }
+            const spikeHint = maxAbs > 5 * rms ? ` — 큰 움직임 스파이크 감지(최대 ${maxAbs.toFixed(1)}px): 휴대폰과 피사체를 고정하고 움직임 없는 20~30초를 재촬영하세요` : '';
+            const fullDesc = !acFull.ok ? acFull.reason
+              : !fullConsistent ? `두 계산법 불일치: 자기상관 ${acFull.bpm.toFixed(0)} vs 피크 계수 ${pkFull.toFixed(0)}회/분`
+              : `전체 자기상관 피크 ${acFull.peak.toFixed(2)} < 개발용 임계 ${cfg.minAcfPeak}`;
+            return bad(`반복 주기 불명확 (${fullDesc}; ${cfg.winSec}초 안정 구간 탐색에서도 미확인)${spikeHint} — 무호흡 판정 아님`, { snr, camCorr });
+          }
+          bpm = bw.bpm; acfPeak = bw.peak;
+          winT0 = uni.t[bw.s0]; winT1 = uni.t[Math.min(bw.s1, uni.t.length) - 1];
+          rateSeg = sig.subarray ? sig.subarray(bw.s0, bw.s1) : sig.slice(bw.s0, bw.s1);
+        }
+        const pkRate = peakCountRate(rateSeg, cfg.resampleFs, cfg);
+        const mismatch = (pkRate != null && bpm > 0) ? Math.abs(pkRate - bpm) / bpm : null;
+        if (mismatch != null && mismatch > cfg.rrMismatchMax)
+          return bad(`두 계산법 불일치 (자기상관 ${bpm.toFixed(0)} vs 피크 계수 ${pkRate.toFixed(0)}회/분, ${(mismatch * 100).toFixed(0)}% > 개발용 임계 ${cfg.rrMismatchMax * 100}%) — 무호흡 판정 아님`, { snr, camCorr });
+        // 보고 호흡수: 들숨 피크 간격 기반(사람이 세는 방식). 불규칙 호흡에서 자기상관 주기(평균 오차 1.5·최대 8회/분, 합성)보다 정확(0.2·최대 1).
+        // 전체 사용 구간의 피크 간격이 자기상관 주기와 30% 안이면 채택, 아니면 안정 창 안의 피크만으로 재시도, 그래도 아니면 자기상관 주기를 보고(rateMethod='acf').
+        const periodBpm = bpm;
+        const pkIdx = findBreathPeaks(sig, cfg.resampleFs, cfg), pkT = pkIdx.map(i => uni.t[i]);
+        const ibiOf = (ts) => ts.length >= 3 ? 60 * (ts.length - 1) / (ts[ts.length - 1] - ts[0]) : null;
+        let breaths = null, rateMethod = 'acf';
+        const tryScope = (ts, scope, t0s, t1s) => { const v = ibiOf(ts); if (v != null && Math.abs(v - periodBpm) / periodBpm <= cfg.rrMismatchMax) { breaths = { n: ts.length, t0: t0s, t1: t1s, scope, peaksT: ts.map(v2 => +v2.toFixed(2)), countBpm: ts.length * 60 / Math.max(1e-6, t1s - t0s), ibiBpm: v }; rateMethod = 'ibi'; return true; } return false; };
+        if (!tryScope(pkT, 'full', uni.t[0], uni.t[uni.t.length - 1]) && winT0 != null) tryScope(pkT.filter(t => t >= winT0 && t <= winT1), 'window', winT0, winT1);
+        if (rateMethod === 'ibi') bpm = breaths.ibiBpm;
+        return { status: 'ok', kind, bpm, periodBpm, rateMethod, breaths, acfPeak, windowT0: winT0, windowT1: winT1, peakCountBpm: pkRate, waveform: wave, duration, rms, bgRms, validRatio, sideApplied, sideNoise, snr, camCorr, pos: Array.from(pos) };
+      }
+
+      // 이동형(행 프로파일 수직 변위) — 기본. 확장형(창 상·하 절반의 반대 방향 변위) — 위에서 내려다본 촬영에서 가슴이 카메라 쪽으로
+      // 부풀 때 영상에서는 수직 이동이 아니라 중심에서 바깥으로 벌어지는 확장으로 보이므로, 그 성분을 따로 잰다.
+      // 후보 신호: 이동형(창 전체) · 이동형-위(가슴) · 이동형-아래(배) · 확장형(위·아래 반대 변위). 각각 같은 게이트를 통과해야 한다.
+      const transRes = evalSignal(roiShift, 'translation');
+      const avail = (arr) => arr.length === roiShift.length && arr.filter(v => v != null).length >= 0.7 * roiShift.length;
+      const divRes = avail(divArr) ? evalSignal(divArr, 'expansion') : null;
+      const upRes = avail(upArr) ? evalSignal(upArr, 'translation-upper') : null;
+      const lowRes = avail(lowArr) ? evalSignal(lowArr, 'translation-lower') : null;
+      // 채택 후보는 이동형(전체)·확장형 둘뿐. 위/아래 절반 이동형은 손떨림 잔차에 취약해(합성 시험에서 18~19회/분 가짜 발생) 진단 목록에만 싣는다.
+      const all = [transRes, upRes, lowRes, divRes].filter(Boolean);
+      const selectable = [transRes, divRes].filter(Boolean);
+      const okList = selectable.filter(r => r.status === 'ok').sort((a, b) => b.acfPeak - a.acfPeak);
+      const KIND_KO = { translation: '이동형', 'translation-upper': '이동형(가슴)', 'translation-lower': '이동형(배)', expansion: '확장형' };
+      const candSummary = all.map(r => ({ kind: r.kind, status: r.status, bpm: r.status === 'ok' ? +r.bpm.toFixed(1) : null, acfPeak: r.status === 'ok' ? +r.acfPeak.toFixed(2) : null, reason: r.status === 'ok' ? null : r.reason }));
+      let chosen = null, disagreeNote = null;
+      if (okList.length) {
+        const best = okList[0];
+        // best와 30% 넘게 다른 후보 중 주기성이 강한(≥ strongAcf) 것이 있으면 어느 쪽도 믿을 수 없음
+        const strong = cfg.strongAcfPeak;
+        const rivals = okList.slice(1).filter(r => Math.abs(r.bpm - best.bpm) / Math.max(r.bpm, best.bpm) > cfg.rrMismatchMax);
+        const strongRivals = rivals.filter(r => r.acfPeak >= strong);
+        if (strongRivals.length || (rivals.length && best.acfPeak < strong)) {
+          const desc = okList.map(r => `${KIND_KO[r.kind] || r.kind} ${r.bpm.toFixed(0)}(주기성 ${r.acfPeak.toFixed(2)})`).join(' · ');
+          return fail(`후보 신호 불일치: ${desc} — 피사체 움직임·잡음으로 주기를 특정할 수 없음, 무호흡 판정 아님`, {
+            kind: best.kind, waveform: best.waveform, waveformAlt: (okList[1] || all.find(r => r !== best) || {}).waveform || null, duration, rms: best.rms, bgRms, validRatio, snr: best.snr, camCorr: best.camCorr,
+            candidates: candSummary, candidate: { kind: best.kind, bpm: best.bpm, acfPeak: best.acfPeak }, altResult: okList[1] ? { kind: okList[1].kind, status: 'ok', bpm: okList[1].bpm, acfPeak: okList[1].acfPeak } : null,
+            sideApplied: best.sideApplied, sideNoise: best.sideNoise, quietNote, movementHigh, motionMeanAll,
+          });
+        }
+        chosen = best;
+        if (rivals.length) disagreeNote = `다른 후보 신호(${rivals.map(r => `${KIND_KO[r.kind] || r.kind} ${r.bpm.toFixed(0)}회/분, 주기성 ${r.acfPeak.toFixed(2)}`).join('; ')})는 달라 주기성 ${best.acfPeak.toFixed(2)}인 ${KIND_KO[best.kind]}만 채택`;
+      }
+      const other = okList.length > 1 ? okList[1] : (all.find(r => r !== chosen) || null);
+      if (!chosen) {
+        return fail(transRes.reason + (divRes ? ` · 확장형 신호도 불가(${divRes.reason.split(' — ')[0]})` : ''), {
+          kind: 'translation', waveform: transRes.waveform, waveformAlt: divRes ? divRes.waveform : null, duration, rms: transRes.rms, bgRms, validRatio,
+          snr: transRes.snr, camCorr: transRes.camCorr, altReason: divRes ? divRes.reason : null, sideApplied: transRes.sideApplied, sideNoise: transRes.sideNoise, candidates: candSummary, quietNote, movementHigh, motionMeanAll,
         });
       }
-      chosen = best;
-      if (rivals.length) disagreeNote = `다른 후보 신호(${rivals.map(r => `${KIND_KO[r.kind] || r.kind} ${r.bpm.toFixed(0)}회/분, 주기성 ${r.acfPeak.toFixed(2)}`).join('; ')})는 달라 주기성 ${best.acfPeak.toFixed(2)}인 ${KIND_KO[best.kind]}만 채택`;
-    }
-    const other = okList.length > 1 ? okList[1] : (all.find(r => r !== chosen) || null);
-    if (!chosen) {
-      return fail(transRes.reason + (divRes ? ` · 확장형 신호도 불가(${divRes.reason.split(' — ')[0]})` : ''), {
-        kind: 'translation', waveform: transRes.waveform, waveformAlt: divRes ? divRes.waveform : null, duration, rms: transRes.rms, bgRms, validRatio,
-        snr: transRes.snr, camCorr: transRes.camCorr, altReason: divRes ? divRes.reason : null, sideApplied: transRes.sideApplied, sideNoise: transRes.sideNoise, candidates: candSummary, quietNote, movementHigh, motionMeanAll,
-      });
-    }
 
-    const warnings = [];
-    if (segNote) warnings.push(segNote);
-    if (quietNote) warnings.push(quietNote);
-    if (movementHigh) warnings.push(`몸 움직임이 큰 영상(평균 ${motionMeanAll.toFixed(0)} %/s)에 조용한 ${cfg.quietMinSec}초 구간이 없어 전체를 분석 — 신뢰 낮음`);
-    if (disagreeNote) warnings.push(disagreeNote);
-    if (chosen.kind === 'expansion') warnings.push(`확장형 신호(창 상·하 절반의 반대 방향 변위)로 추정 — 위에서 내려다본 촬영에 해당; 이동형 신호는 ${transRes.status === 'ok' ? `${transRes.bpm.toFixed(0)}회/분(주기성 ${transRes.acfPeak.toFixed(2)})` : '불가'}`);
-    else if (chosen.kind === 'translation-lower') warnings.push('배 쪽(창 아래 절반) 이동 신호로 추정 — 복식호흡 양상');
-    else if (chosen.kind === 'translation-upper') warnings.push('가슴 쪽(창 위 절반) 이동 신호로 추정');
-    if (chosen.windowT0 != null) warnings.push(`전체 ${duration.toFixed(0)}초의 주기성이 약하거나 불일치해, ${chosen.windowT0.toFixed(0)}~${chosen.windowT1.toFixed(0)}초 안정 구간에서만 추정함`);
-    if (!bgUsable) warnings.push('배경 보정 불가(ROI가 화면 대부분) — 고정 촬영 조건에서만 유효');
-    if (bgRms > cfg.shakeMinPx) warnings.push(`카메라 움직임 감지 (${tracked ? '보정 전 ' : '배경 '}RMS ${bgRms.toFixed(2)}px) — 결과를 수동 계수와 비교할 것`);
-    if (tracked && reanchors > 0) warnings.push(`추적 창 재고정 ${reanchors}회 — 피사체가 크게 움직인 구간은 신호에서 끊김`);
-    if (tracked && noWindow > 0) warnings.push(`추적 창 없음 ${noWindow}프레임 — 자세 미검출 구간은 제외`);
-    if (tracked && winJumps > 0) warnings.push(`추적 창 급변 ${winJumps}쌍 — 창 크기·위치가 급히 바뀐 프레임 쌍은 제외`);
-    if (tracked && chosen.kind === 'translation' && !chosen.sideApplied) warnings.push(`보조 배경 스트립 부족 (${sideUsed}/${sideUsed + sideMissing}쌍) — 창 옆 배경 질감이 없으면 손떨림 잔차 보정이 안 됨(상관 검사만 적용)`);
-    if (chosen.bpm <= cfg.rrMinBpm * 1.05 || chosen.bpm >= cfg.rrMaxBpm * 0.95) warnings.push('추정값이 개발용 탐색 범위 경계 부근 — 범위 밖 주기일 수 있음');
+      const warnings = [];
+      if (segNote) warnings.push(segNote);
+      if (quietNote) warnings.push(quietNote);
+      if (movementHigh) warnings.push(`몸 움직임이 큰 영상(평균 ${motionMeanAll.toFixed(0)} %/s)에 조용한 ${cfg.quietMinSec}초 구간이 없어 전체를 분석 — 신뢰 낮음`);
+      if (disagreeNote) warnings.push(disagreeNote);
+      if (chosen.kind === 'expansion') warnings.push(`확장형 신호(창 상·하 절반의 반대 방향 변위)로 추정 — 위에서 내려다본 촬영에 해당; 이동형 신호는 ${transRes.status === 'ok' ? `${transRes.bpm.toFixed(0)}회/분(주기성 ${transRes.acfPeak.toFixed(2)})` : '불가'}`);
+      else if (chosen.kind === 'translation-lower') warnings.push('배 쪽(창 아래 절반) 이동 신호로 추정 — 복식호흡 양상');
+      else if (chosen.kind === 'translation-upper') warnings.push('가슴 쪽(창 위 절반) 이동 신호로 추정');
+      if (chosen.windowT0 != null) warnings.push(`전체 ${duration.toFixed(0)}초의 주기성이 약하거나 불일치해, ${chosen.windowT0.toFixed(0)}~${chosen.windowT1.toFixed(0)}초 안정 구간에서만 추정함`);
+      if (!bgUsable) warnings.push('배경 보정 불가(ROI가 화면 대부분) — 고정 촬영 조건에서만 유효');
+      if (bgRms > cfg.shakeMinPx) warnings.push(`카메라 움직임 감지 (${tracked ? '보정 전 ' : '배경 '}RMS ${bgRms.toFixed(2)}px) — 결과를 수동 계수와 비교할 것`);
+      if (tracked && reanchors > 0) warnings.push(`추적 창 재고정 ${reanchors}회 — 피사체가 크게 움직인 구간은 신호에서 끊김`);
+      if (tracked && noWindow > 0) warnings.push(`추적 창 없음 ${noWindow}프레임 — 자세 미검출 구간은 제외`);
+      if (tracked && winJumps > 0) warnings.push(`추적 창 급변 ${winJumps}쌍 — 창 크기·위치가 급히 바뀐 프레임 쌍은 제외`);
+      if (tracked && chosen.kind === 'translation' && !chosen.sideApplied) warnings.push(`보조 배경 스트립 부족 (${sideUsed}/${sideUsed + sideMissing}쌍) — 창 옆 배경 질감이 없으면 손떨림 잔차 보정이 안 됨(상관 검사만 적용)`);
+      if (chosen.bpm <= cfg.rrMinBpm * 1.05 || chosen.bpm >= cfg.rrMaxBpm * 0.95) warnings.push('추정값이 개발용 탐색 범위 경계 부근 — 범위 밖 주기일 수 있음');
 
-    return Object.assign({
-      status: 'ok',
-      bpm: chosen.bpm,           // 회/분 — rateMethod='ibi'면 들숨 피크 간격 평균, 'acf'면 자기상관 주기
-      periodBpm: chosen.periodBpm, rateMethod: chosen.rateMethod, breaths: chosen.breaths, // 계수 정보 {n, t0, t1, scope, peaksT, countBpm(n·60/T), ibiBpm}
-      acfPeak: chosen.acfPeak,   // 자기상관 피크 (0~1, 주기성 지표, 임상 신뢰도 아님)
-      signalKind: chosen.kind,   // 'translation' | 'expansion'
-      windowT0: chosen.windowT0, windowT1: chosen.windowT1, // 안정 구간 추정 시 사용 구간(초), 전체 구간이면 null
-      peakCountBpm: chosen.peakCountBpm,
-      raw: rawOf(),              // 프레임별 누적 변위(CSV용): pos=이동형, div=확장형
-      usedT0: times[0], usedT1: times[times.length - 1],
-      duration, rms: chosen.rms, bgRms, validRatio, segValidRatio, snr: chosen.snr, camCorr: chosen.camCorr, sideApplied: chosen.sideApplied, sideNoise: chosen.sideNoise,
-      waveform: chosen.waveform, waveformAlt: other ? other.waveform : null, altResult: other ? { kind: other.kind, status: other.status, bpm: other.bpm != null ? other.bpm : null, acfPeak: other.acfPeak != null ? other.acfPeak : null, reason: other.reason || null } : null,
-      candidates: candSummary, quietNote, movementHigh, motionMeanAll, segments: segmentsAll,
-      warnings,
-      config: cfg,
-    }, counters());
+      return Object.assign({
+        status: 'ok',
+        bpm: chosen.bpm,           // 회/분 — rateMethod='ibi'면 들숨 피크 간격 평균, 'acf'면 자기상관 주기
+        periodBpm: chosen.periodBpm, rateMethod: chosen.rateMethod, breaths: chosen.breaths, // 계수 정보 {n, t0, t1, scope, peaksT, countBpm(n·60/T), ibiBpm}
+        acfPeak: chosen.acfPeak,   // 자기상관 피크 (0~1, 주기성 지표, 임상 신뢰도 아님)
+        signalKind: chosen.kind,   // 'translation' | 'expansion'
+        windowT0: chosen.windowT0, windowT1: chosen.windowT1, // 안정 구간 추정 시 사용 구간(초), 전체 구간이면 null
+        peakCountBpm: chosen.peakCountBpm,
+        raw: rawOf(),              // 프레임별 누적 변위(CSV용): pos=이동형, div=확장형
+        usedT0: times[0], usedT1: times[times.length - 1],
+        duration, rms: chosen.rms, bgRms, validRatio, segValidRatio, snr: chosen.snr, camCorr: chosen.camCorr, sideApplied: chosen.sideApplied, sideNoise: chosen.sideNoise,
+        waveform: chosen.waveform, waveformAlt: other ? other.waveform : null, altResult: other ? { kind: other.kind, status: other.status, bpm: other.bpm != null ? other.bpm : null, acfPeak: other.acfPeak != null ? other.acfPeak : null, reason: other.reason || null } : null,
+        candidates: candSummary, quietNote, movementHigh, motionMeanAll, segments: segmentsAll,
+        warnings,
+        config: cfg,
+      }, counters());
+    };
+    if (!stretches.length) { setRange(0, full.times.length); return Object.assign(analyzeCurrent(null), { rawAll: rawAllOf() }); }
+    const tried = []; let bestRes = null, firstRes = null;
+    for (const st of stretches) {
+      setRange(st[0], st[1]);
+      const whole = st[1] - st[0] >= full.times.length;
+      const note = whole ? null : `몸 움직임이 적은 ${times[0].toFixed(1)}~${times[times.length - 1].toFixed(1)}초 구간만 사용 (≤${cfg.quietMotionMax} %/s; 전체 평균 ${motionMeanAll.toFixed(0)} %/s${stretches.length > 1 ? `; 조용한 구간 ${stretches.length}개 중 채택` : ''})`;
+      const res = analyzeCurrent(note);
+      tried.push({ t0: +times[0].toFixed(1), t1: +times[times.length - 1].toFixed(1), sec: +st[2].toFixed(1), status: res.status, bpm: res.status === 'ok' ? +res.bpm.toFixed(1) : null, acfPeak: res.status === 'ok' ? +res.acfPeak.toFixed(2) : null, reason: res.status === 'ok' ? null : res.reason });
+      if (!firstRes) firstRes = res;
+      if (res.status === 'ok' && (!bestRes || res.acfPeak > bestRes.acfPeak + 0.05 || (Math.abs(res.acfPeak - bestRes.acfPeak) <= 0.05 && res.duration > bestRes.duration))) bestRes = res;
+    }
+    const out = bestRes || firstRes;
+    if (!bestRes && stretches.length > 1) out.reason = `${out.reason} · 조용한 구간 ${stretches.length}개 모두 판정 불가`;
+    return Object.assign(out, { quietTried: tried, rawAll: rawAllOf() });
   }
 
   return { pushFrame, finish, get frameCount() { return nFrames; }, config: cfg };
@@ -2614,7 +2633,7 @@ function leaveCamera(reason){
   sourceButtons(false); $('btnRun').disabled=true; $('btnAgain').hidden=true;
   if(reason) $('liveStatus').textContent=reason;
 }
-$('liveStatus').textContent='v12.13 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
+$('liveStatus').textContent='v12.14 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
 $('btnLive').addEventListener('click',openCamera);
 window.addEventListener('unhandledrejection',function(e){$('liveStatus').textContent='실행 오류: '+(e.reason&&e.reason.message||e.reason);});
 function cameraTimeout(p,ms,message){var timer;return Promise.race([p,new Promise(function(_,reject){timer=setTimeout(function(){reject(new Error(message));},ms);})]).finally(function(){clearTimeout(timer);});}
@@ -3528,7 +3547,8 @@ function showResult(r){
     ['추정 사용 구간', r.status === 'ok' ? (r.windowT0 != null ? r.windowT0.toFixed(0) + '~' + r.windowT1.toFixed(0) + '초 (안정 구간, 파형에 음영 표시)' : '전체 구간') : '-'],
     ['들숨 계수(파형의 ● 표시)', r.breaths ? (r.breaths.n + '회 / ' + (r.breaths.t1 - r.breaths.t0).toFixed(1) + '초 (' + (r.breaths.scope === 'window' ? '안정 구간' : '사용 구간 전체') + ') → 단순 계수 ' + r.breaths.countBpm.toFixed(1) + '회/분, 간격 평균 ' + r.bpm.toFixed(1) + '회/분') : (r.status === 'ok' ? '피크 계수가 주기 분석과 30% 넘게 달라 미표시 — 주기 분석값 보고' : '-')],
     ['주기 분석(자기상관)', r.periodBpm != null ? fmt(r.periodBpm, 1) + '회/분 · 피크 ' + (r.acfPeak != null ? fmt(r.acfPeak, 2) : '-') + ' (주기성 지표, 임상 신뢰도 아님)' : (r.acfPeak != null ? '피크 ' + fmt(r.acfPeak, 2) : '-')],
-    ['피크 계수 교차검증', r.peakCountBpm != null ? fmt(r.peakCountBpm, 1) + '회/분' : '-']
+    ['피크 계수 교차검증', r.peakCountBpm != null ? fmt(r.peakCountBpm, 1) + '회/분' : '-'],
+    ['조용한 구간 시도', (r.quietTried && r.quietTried.length) ? r.quietTried.map(function(q){ return q.t0 + '~' + q.t1 + '초 ' + (q.status === 'ok' ? q.bpm + '회/분(주기성 ' + q.acfPeak + ')' : '불가'); }).join(' · ') + ' — 주기성이 가장 뚜렷한 구간 채택' : '-']
   ];
   list.innerHTML = rows.map(function(x){ return '<dt>' + x[0] + '</dt><dd>' + x[1] + '</dd>'; }).join('');
   if (r.warnings && r.warnings.length) {
@@ -3803,18 +3823,19 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
   });
   var ap=lastRun&&lastRun.appearRes;
   if(ap) lines.push('# appearance(측정값만, 판정 아님): '+JSON.stringify(ap.status==='ok'?{faceRatio:ap.faceRatio,eyeOpenMean:ap.eyeOpenMean,eyeOpenRatio:ap.eyeOpenRatio,gazeCenterRatio:ap.gazeCenterRatio,gazeOffsetMean:ap.gazeOffsetMean,jawOpenMean:ap.jawOpenMean,frownMean:ap.frownMean,browInnerUpMean:ap.browInnerUpMean,smileMean:ap.smileMean,config:ap.config}:{status:ap.status,reason:ap.reason}));
-  if(respRes&&respRes.tracked) lines.push('# resp_tracking: '+JSON.stringify({tracked:true,status:respRes.status,signalKind:respRes.signalKind||null,rateMethod:respRes.rateMethod||null,periodBpm:respRes.periodBpm!=null?+respRes.periodBpm.toFixed(1):null,breaths:respRes.breaths?{n:respRes.breaths.n,t0:+respRes.breaths.t0.toFixed(1),t1:+respRes.breaths.t1.toFixed(1),scope:respRes.breaths.scope,countBpm:+respRes.breaths.countBpm.toFixed(1),peaksT:respRes.breaths.peaksT}:null,lowConfidence:!!respRes.lowConfidence,motionDuringWindow:respRes.motionDuringWindow!=null?+respRes.motionDuringWindow.toFixed(1):null,acfPeak:respRes.acfPeak!=null?+respRes.acfPeak.toFixed(2):null,candidate:respRes.candidate||null,usedT0:respRes.usedT0!=null?+respRes.usedT0.toFixed(2):null,usedT1:respRes.usedT1!=null?+respRes.usedT1.toFixed(2):null,segments:respRes.segments||null,roiBreaks:respRes.roiBreaks,sampleCount:respRes.sampleCount,quietNote:respRes.quietNote||null,movementHigh:!!respRes.movementHigh,candidates:respRes.candidates||null,reanchors:respRes.reanchors,noWindow:respRes.noWindow,winJumps:respRes.winJumps,gaps:respRes.gaps,pairs:respRes.pairs,invalid:respRes.invalid,lowTexture:respRes.lowTexture,sideUsed:respRes.sideUsed,sideMissing:respRes.sideMissing,divAvail:respRes.divAvail,snr:respRes.snr,camCorr:respRes.camCorr,camRms:respRes.bgRms,alt:respRes.altResult||(respRes.altReason?{reason:respRes.altReason}:null)}));
+  if(respRes&&respRes.tracked) lines.push('# resp_tracking: '+JSON.stringify({tracked:true,status:respRes.status,signalKind:respRes.signalKind||null,quietTried:respRes.quietTried||null,rateMethod:respRes.rateMethod||null,periodBpm:respRes.periodBpm!=null?+respRes.periodBpm.toFixed(1):null,breaths:respRes.breaths?{n:respRes.breaths.n,t0:+respRes.breaths.t0.toFixed(1),t1:+respRes.breaths.t1.toFixed(1),scope:respRes.breaths.scope,countBpm:+respRes.breaths.countBpm.toFixed(1),peaksT:respRes.breaths.peaksT}:null,lowConfidence:!!respRes.lowConfidence,motionDuringWindow:respRes.motionDuringWindow!=null?+respRes.motionDuringWindow.toFixed(1):null,acfPeak:respRes.acfPeak!=null?+respRes.acfPeak.toFixed(2):null,candidate:respRes.candidate||null,usedT0:respRes.usedT0!=null?+respRes.usedT0.toFixed(2):null,usedT1:respRes.usedT1!=null?+respRes.usedT1.toFixed(2):null,segments:respRes.segments||null,roiBreaks:respRes.roiBreaks,sampleCount:respRes.sampleCount,quietNote:respRes.quietNote||null,movementHigh:!!respRes.movementHigh,candidates:respRes.candidates||null,reanchors:respRes.reanchors,noWindow:respRes.noWindow,winJumps:respRes.winJumps,gaps:respRes.gaps,pairs:respRes.pairs,invalid:respRes.invalid,lowTexture:respRes.lowTexture,sideUsed:respRes.sideUsed,sideMissing:respRes.sideMissing,divAvail:respRes.divAvail,snr:respRes.snr,camCorr:respRes.camCorr,camRms:respRes.bgRms,alt:respRes.altResult||(respRes.altReason?{reason:respRes.altReason}:null)}));
   if(lastRun&&lastRun.meta&&lastRun.meta.exposureSteps) lines.push('# exposure_adjust(자동 노출 보정, EV): '+JSON.stringify(lastRun.meta.exposureSteps));
   if (lastRun && lastRun.meta && lastRun.meta.diagnostics && lastRun.meta.diagnostics.faceEngine) lines.push('# face_engine: ' + JSON.stringify({ engine: lastRun.meta.diagnostics.faceEngine, switched: lastRun.meta.diagnostics.faceEngineSwitch, probes: lastRun.meta.faceProbes || null, probeEngineErrors: lastRun.meta.diagnostics.probeEngineErrors }));
   (function(){ var c={mp:0,'mp-crop':0,pose:0,none:0,mismatch:0,poseSkipped:0}; records.forEach(function(r){ if(r.faceSrc) c[r.faceSrc]=(c[r.faceSrc]||0)+1; if(r.poseSkip) c.poseSkipped++; }); if(records.length) lines.push('# face_src(프레임 수; mp=얼굴 모델 전체 프레임, mp-crop=자세 모델이 가리킨 얼굴 영역을 잘라 재검출, pose=자세 모델 대체(품질 낮음), none=미검출; poseSkipped=과부하로 자세 추론 생략): '+JSON.stringify(c)); })();
   if(lastRun&&lastRun.meta&&lastRun.meta.poseEngine){ var pe=lastRun.meta.poseEngine, pc={found:0,none:0,multi:0,skipped:0}; records.forEach(function(r){ if(r.poseN==null){ if(r.poseSkip) pc.skipped++; return; } if(r.poseN===1) pc.found++; else if(r.poseN>1) pc.multi++; else pc.none++; });
     lines.push('# pose_engine(자세 모델 엔진/입력; video=영상 요소 직접, canvas=2D 캔버스 사본; 자가 진단은 얼굴은 보이는데 자세 0명일 때만 실행): '+JSON.stringify({engine:pe.engine,switched:pe.switched,switches:pe.switches,poseFrames:pc,probes:pe.probes,probeErrors:pe.probeErrors})); }
-  lines.push('t_s,resp_disp_px,motion_idx_pct_s,motion_valid_ratio,motion_bg_ok,cam_idx_pct_s,motion_reason,lip_L,lip_a,lip_b,lip_reason,cheek_L,cheek_a,cheek_b,cheek_reason,lip_cheek_dE_aux,track_status,cam_ok,cam_dx_px,cam_dy_px,eye_open,gaze_off,jaw_open,lip_region,lip_segment,lip_pixels,cheek_region,cheek_segment,cheek_pixels,face_src,face_n,pose_skip,face_n_raw,lip_clip,lip_meanY,cheek_clip,cheek_meanY,resp_div_px,pose_n');
+  lines.push('t_s,resp_disp_px,motion_idx_pct_s,motion_valid_ratio,motion_bg_ok,cam_idx_pct_s,motion_reason,lip_L,lip_a,lip_b,lip_reason,cheek_L,cheek_a,cheek_b,cheek_reason,lip_cheek_dE_aux,track_status,cam_ok,cam_dx_px,cam_dy_px,eye_open,gaze_off,jaw_open,lip_region,lip_segment,lip_pixels,cheek_region,cheek_segment,cheek_pixels,face_src,face_n,pose_skip,face_n_raw,lip_clip,lip_meanY,cheek_clip,cheek_meanY,resp_div_px,pose_n,resp_disp_all_px');
   var apAt=new Map(ap&&ap.series?ap.series.map(function(v){return [v.t.toFixed(6),v];}):[]);
   if(lastRun && lastRun.meta)lines.splice(1,0,'# capture: '+JSON.stringify(lastRun.meta));
   var raw = respRes && respRes.raw;
   var respAt=new Map(raw?raw.t.map(function(t,i){return [t.toFixed(6),raw.pos[i]];}):[]);
   var divAt=new Map((raw&&raw.div)?raw.t.map(function(t,i){return [t.toFixed(6),raw.div[i]];}):[]);
+  var rawAll=respRes&&respRes.rawAll; var allAt=new Map(rawAll?rawAll.t.map(function(t,i){return [t.toFixed(6),rawAll.pos[i]];}):[]); // 사용 구간 밖까지 전체 누적 변위(진단용)
   var motionAt=new Map(motionRes&&motionRes.series?motionRes.series.map(function(v){return [v.t.toFixed(6),v];}):[]);
   for (var i = 0; i < records.length; i++) {
     var rec = records[i];
@@ -3837,7 +3858,8 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
       rec.faceSrc||'', rec.faceN!=null?rec.faceN:'', rec.poseSkip!=null?rec.poseSkip:'', rec.faceNRaw!=null?rec.faceNRaw:'',
       lip&&lip.clipRatio!=null?lip.clipRatio.toFixed(2):'', lip&&lip.meanY!=null?lip.meanY.toFixed(0):'', chk&&chk.clipRatio!=null?chk.clipRatio.toFixed(2):'', chk&&chk.meanY!=null?chk.meanY.toFixed(0):'',
       csvNum(divAt.get(rec.t.toFixed(6)), 3),
-      rec.poseN!=null?rec.poseN:''
+      rec.poseN!=null?rec.poseN:'',
+      csvNum(allAt.get(rec.t.toFixed(6)), 3)
     ].join(','));
   }
   lastCsv = lines.join('\n');
