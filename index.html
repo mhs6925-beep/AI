@@ -2,7 +2,7 @@
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PAT 삼각형 영상 평가 v12.18</title>
+<title>PAT 삼각형 영상 평가 v12.19</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
 /* 레이아웃: 단일 컬럼 단계형(①~⑦) 도구 페이지, 폰 우선 */
@@ -124,7 +124,7 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
 
 <main>
   <header>
-    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.18 · 연구용</span></h1>
+    <h1>PAT 삼각형 영상 평가 <span class="badge bad">시연판 v12.19 · 연구용</span></h1>
     <p class="sub">휴대폰 한 대로 소아평가삼각형(PAT)의 세 축 — 호흡·외관·피부순환 — 을 객관적 수치로 기록합니다. 손에 들고 한 번 촬영하면 얼굴·몸을 자동으로 따라가며 측정합니다. 측정값만 제공하며 정상/이상 판정은 하지 않습니다.</p>
   </header>
 
@@ -142,6 +142,17 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
       <button id="btnDemoFile">녹화 영상으로 측정</button>
       <label style="font-size:.85em"><input type="checkbox" id="respCropChk"> 호흡 신호 3배 크롭(실험 — 같은 녹화를 켜고/끄고 비교용)</label>
     </div>
+    <details id="verifyPanel" style="margin-top:6px"><summary>검증용 기록 (개발·검증 — 측정 로직·임계값에 영향 없음)</summary>
+      <div class="row" style="margin-top:6px"><label style="font-size:.85em"><input type="checkbox" id="recChk"> 카메라 촬영 영상을 이 기기에 저장(검증용 · 업로드 없음 · 측정 뒤 저장 버튼이 나타남)</label></div>
+      <div class="row" style="margin-top:6px">
+        <button id="btnThumbs" disabled>검토용 그림(JPG) 내보내기</button>
+        <button id="btnRecDl" hidden>촬영 영상 저장(.webm)</button>
+        <button id="btnAttemptCsv">시도 로그 CSV</button>
+        <button id="btnAttemptClear">시도 로그 지우기</button>
+        <span id="verifyNote" class="note"></span>
+      </div>
+      <p class="hint">검토용 그림: 2초마다 한 장 + 상태 전환(몸 이동 판정 시작·종료, 창 출처 변경, 추적 상실·복귀, 재고정, 프레임 공백) 직전·직후 프레임에 분석 창(실선)·랜드마크 원시 창(점선)·몸 상자·제외 사유를 겹쳐 그린 것(분석 해상도). 시도 로그: 이 기기에서 실행한 모든 측정(성공·실패·중단·오류)을 자동 기록 — 앱 버전·설정·결과·분석 범위·첫 추정까지 시간·직접 센 값·추적 비율. 기기 안(localStorage)에만 저장됩니다.</p>
+    </details>
     <div id="demoBanner" class="reason" hidden></div>
     <canvas id="liveView" hidden aria-label="실시간 추적 화면"></canvas>
     <div id="patBoard" class="pat" hidden>
@@ -273,6 +284,25 @@ details{font-size:.82rem; color:var(--muted);} details pre{white-space:pre-wrap;
       <span id="manualDiff" class="note"></span>
     </div>
     <p class="hint">⑥ 같은 영상을 보며 사람이 직접 센 값을 입력하면 추정값과의 차이를 보여줍니다. 시제품 검증은 이 수동 계수 비교로만 하세요.</p>
+  </section>
+
+  <section class="step" id="stepReview" hidden>
+    <h2><span class="num">4r</span>검토 — 제외 구간을 영상 위에서 확인 <span class="badge bad">검증용 · 측정값 아님</span></h2>
+    <div id="reviewPlayerWrap" hidden>
+      <canvas id="reviewView" aria-label="검토 재생 화면"></canvas>
+      <div class="row" style="margin-top:6px;align-items:center">
+        <button id="rvPlay">재생</button><button id="rvPrev">◀ 이전 제외</button><button id="rvNext">다음 제외 ▶</button>
+        <select id="rvSpeed"><option value="0.5">0.5×</option><option value="1" selected>1×</option></select>
+        <input type="range" id="rvSlider" min="0" max="1000" value="0" style="flex:1;min-width:120px">
+        <span id="rvTime" class="note">0.0초</span>
+      </div>
+      <p class="note" id="rvInfo"></p>
+    </div>
+    <canvas id="reviewBar" height="40" aria-label="시간축: 제외 구간과 분석 범위"></canvas>
+    <p class="note" id="reviewLegend"></p>
+    <table class="syn" id="exclTable"><thead><tr><th>구간(초)</th><th>제외 사유</th><th>지표</th><th>실제 몸 이동?</th><th>창이 흉복부 이탈?</th><th>메모</th></tr></thead><tbody></tbody></table>
+    <div class="row" style="margin-top:6px"><button id="btnReviewApply">검토 표시를 CSV에 포함</button><span id="reviewNote" class="note"></span></div>
+    <p class="hint">제외 사유는 프로그램의 판정이고, '실제 몸 이동?'·'창이 흉복부 이탈?'은 사람이 영상(또는 검토용 그림)을 보고 표시하는 칸입니다. 세 경우를 구분하기 위한 것입니다: ① 아이가 실제로 움직임(영상에서 보임, 몸 지표 큼) ② 아이는 정지해 있는데 랜드마크·창이 흔들림(점선 창이 튐, '원시창 흔들림 σ'가 큼) ③ 카메라 이동이 몸 이동으로 분류됨(카메라 지표가 크거나 cam✓ 비율이 낮음). 녹화 파일 분석에서는 위 재생기로 해당 구간을 바로 볼 수 있고, 카메라 측정은 '검증용 기록'에서 영상 저장을 켜면 그 파일을 '녹화 영상으로 측정'에 넣어 같은 방식으로 볼 수 있습니다.</p>
   </section>
 
   <section class="step" id="stepRespInt" hidden>
@@ -823,9 +853,13 @@ function createAnalyzer(w, h, roi, userCfg) {
   const markBreak = (t, kind) => { breaks.push(t); breakIdx.add(timesAll.length); if (kind === 'gap') gaps++; else if (kind === 'move') moveBreaks++; else roiBreaks++; };
   const bgUsable = tracked ? true : bgStrips.length > 0;
   let hardError = null;
+  // 프레임별 판정 기록(검증용, v12.19): 측정 로직과 무관하게 '이 프레임이 표본이 됐는지, 아니면 왜 빠졌는지'를 남긴다 — 앱이 CSV·검토 화면에 쓴다.
+  // code: sample(표본 채택) · no-window(창 없음) · moving(몸 이동 중) · out-of-frame(창이 프레임 밖) · first(구간 첫 프레임: 비교 쌍 없음) · reanchor(재고정) · win-jump(창 크기 급변) · low-texture(변위 특정 불가) · hard-error
+  let lastDecision = null;
+  const decide = (code, gapBreak, t) => { lastDecision = { code, gapBreak: !!gapBreak, t }; };
 
   function pushFrame(gray, t, extra) {
-    if (hardError) return false;
+    if (hardError) { decide('hard-error', false, t); return false; }
     nFrames++;
     // 프레임 공백(모델 준비·GC·정지 등): 공백 양쪽 프레임을 쌍으로 비교하지 않고 구간을 끊는다. 전체를 버리지 않음.
     const gapBreak = (lastT != null && t - lastT > cfg.maxGapSec);
@@ -833,22 +867,22 @@ function createAnalyzer(w, h, roi, userCfg) {
     if (firstT == null) firstT = t;
     lastT = t;
     const roiNow = tracked ? (extra && extra.window) : roi;
-    if (!roiNow) { if (!tracked) { hardError = 'ROI 없음'; return false; } pairs++; invalid++; noWindow++; if (prevRoiP !== null) markBreak(t, 'roi'); prevRoiP = null; prevWin = null; return true; }
+    if (!roiNow) { if (!tracked) { hardError = 'ROI 없음'; decide('hard-error', gapBreak, t); return false; } pairs++; invalid++; noWindow++; if (prevRoiP !== null) markBreak(t, 'roi'); prevRoiP = null; prevWin = null; decide('no-window', gapBreak, t); return true; }
     // 몸 이동 중(추종기 판정): 이 프레임은 표본에서 빼고 구간을 끊는다 — 이동 잔차가 호흡 신호에 섞이지 않게(v12.16)
-    if (tracked && extra && extra.bodyMoving) { pairs++; invalid++; movingFrames++; if (prevRoiP !== null) markBreak(t, 'move'); prevRoiP = null; prevWin = null; return true; }
+    if (tracked && extra && extra.bodyMoving) { pairs++; invalid++; movingFrames++; if (prevRoiP !== null) markBreak(t, 'move'); prevRoiP = null; prevWin = null; decide('moving', gapBreak, t); return true; }
     const fw = (tracked && extra && extra.frameW) ? extra.frameW : W0, fh = (tracked && extra && extra.frameH) ? extra.frameH : H0;
     const pr = rowProfile(gray, fw, fh, roiNow);
-    if (!pr) { if (!tracked) { hardError = 'ROI가 프레임 밖'; return false; } pairs++; invalid++; noWindow++; if (prevRoiP !== null) markBreak(t, 'roi'); prevRoiP = null; prevWin = null; return true; }
+    if (!pr) { if (!tracked) { hardError = 'ROI가 프레임 밖'; decide('hard-error', gapBreak, t); return false; } pairs++; invalid++; noWindow++; if (prevRoiP !== null) markBreak(t, 'roi'); prevRoiP = null; prevWin = null; decide('out-of-frame', gapBreak, t); return true; }
     const bgPs = bgStrips.map(s => rowProfile(gray, fw, fh, s));
     const winNow = tracked ? { y: roiNow.y, h: roiNow.h, roundDy: (extra && isFinite(extra.roundDy)) ? extra.roundDy : 0 } : null;
     const sideP = tracked ? sideStrips(roiNow, extra && extra.bodyBox, fw).map(s => rowProfile(gray, fw, fh, s)).filter(Boolean) : null;
-    if (prevRoiP === null) { prevRoiP = pr; prevBgP = bgPs; prevWin = winNow; prevSideP = sideP; return true; }
-    if (tracked && extra && extra.breakContinuity) { reanchors++; markBreak(t, 'reanchor'); prevRoiP = pr; prevBgP = bgPs; prevWin = winNow; prevSideP = sideP; return true; }
+    if (prevRoiP === null) { prevRoiP = pr; prevBgP = bgPs; prevWin = winNow; prevSideP = sideP; decide('first', gapBreak, t); return true; }
+    if (tracked && extra && extra.breakContinuity) { reanchors++; markBreak(t, 'reanchor'); prevRoiP = pr; prevBgP = bgPs; prevWin = winNow; prevSideP = sideP; decide('reanchor', gapBreak, t); return true; }
     let roundFix = 0;
     if (tracked && prevWin) {
       roundFix = winNow.roundDy - prevWin.roundDy;
       const dh = Math.abs(winNow.h - prevWin.h) / Math.max(1, prevWin.h);
-      if (dh > 0.15) { winJumps++; pairs++; invalid++; prevRoiP = pr; prevBgP = bgPs; prevWin = winNow; prevSideP = sideP; return true; }
+      if (dh > 0.15) { winJumps++; pairs++; invalid++; prevRoiP = pr; prevBgP = bgPs; prevWin = winNow; prevSideP = sideP; decide('win-jump', gapBreak, t); return true; }
     }
 
     pairs++;
@@ -879,7 +913,9 @@ function createAnalyzer(w, h, roi, userCfg) {
       // 변위 특정 불가(질감 부족·모호) 프레임: 0으로 넣지 않고 표본 자체를 건너뛴다.
       // 0을 넣으면 실패 프레임의 반복 주기가 가짜 저주파 신호로 섞여 든다.
       invalid++; lowTexture += (est && std(pr) < cfg.minProfileStd) ? 1 : 0;
+      decide('low-texture', gapBreak, t);
     } else {
+      decide('sample', gapBreak, t);
       timesAll.push(t);
       // 확장형 성분: 창의 위 절반과 아래 절반 프로파일의 변위 차/2 (가슴이 카메라 쪽으로 부풀면 위는 위로, 아래는 아래로)
       {
@@ -1231,7 +1267,7 @@ function createAnalyzer(w, h, roi, userCfg) {
     return Object.assign(out, { segments: segmentsAll, segmentTried: tried, quietTried: tried, rawAll: rawAllOf(), excludedRanges });
   }
 
-  return { pushFrame, finish, get frameCount() { return nFrames; }, config: cfg };
+  return { pushFrame, finish, get frameCount() { return nFrames; }, get lastDecision() { return lastDecision; }, config: cfg };
 }
 
 /*
@@ -2765,7 +2801,7 @@ function leaveCamera(reason){
   sourceButtons(false); $('btnRun').disabled=true; $('btnAgain').hidden=true;
   if(reason) $('liveStatus').textContent=reason;
 }
-$('liveStatus').textContent='v12.18 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
+$('liveStatus').textContent='v12.19 시연판 · 실행 준비 완료. 맨 위 [측정 시작]을 누르면 카메라·자동 추적으로 바로 측정합니다.';
 $('btnLive').addEventListener('click',openCamera);
 window.addEventListener('unhandledrejection',function(e){$('liveStatus').textContent='실행 오류: '+(e.reason&&e.reason.message||e.reason);});
 function cameraTimeout(p,ms,message){var timer;return Promise.race([p,new Promise(function(_,reject){timer=setTimeout(function(){reject(new Error(message));},ms);})]).finally(function(){clearTimeout(timer);});}
@@ -2908,7 +2944,8 @@ $('btnAutoRoi').addEventListener('click',async function(){
   finally{clearTimeout(timer);if(epoch===sourceEpoch){autoBusy=false;lastFrameWall=performance.now();sourceButtons(false);updateRoiInfo();}}
 });
 
-function makeMeasurement(mode){
+function makeMeasurement(mode){ var s=makeMeasurementInner(mode); try{ attemptStart(s); }catch(e){} return s; }
+function makeMeasurementInner(mode){
   if(trackedMode){
     var skin=window.PATSKIN.create(A), tsites=skin.sites;
     return {tracked:true,skin:skin,models:models,cv:null,motionA:null,mode:mode,
@@ -2917,7 +2954,7 @@ function makeMeasurement(mode){
       lm:A.createLandmarkMotion(),appear:A.createAppearance(),
       sites:tsites,records:[],startT:null,lastT:null,maxGap:0,roi:null,origin:'MediaPipe VIDEO 연속 추적 ('+(models&&models.delegate||'?')+')',
       roiSource:{resp:'track',body:'track',lip:'track',cheek:'track'},targetSec:Number($('demoDur').value)||30,
-      lastBodyWin:null,skipPose:false,mpErrors:0,diag:null,lastBoxes:null,wallStart:performance.now()};
+      lastBodyWin:null,skipPose:false,mpErrors:0,diag:null,lastBoxes:null,wallStart:performance.now(),rvThumbs:[],firstEstimateSec:null};
   }
   var sites={};['lip','cheek'].forEach(function(k){if(roiValid(k))sites[k]={rect:Object.assign({},rois[k]),tracker:null,agg:A.createColorAggregator()};});
   var usable={};Object.keys(rois).forEach(function(k){usable[k]=roiValid(k)?rois[k]:null;});
@@ -3240,14 +3277,19 @@ function pushTracked(s,gray,vt,srcEl){
   var fr=s.respFollower.update(landResp,cr,vt);
   if(poseSkipped) s.lm.skip(vt,cr); else s.lm.push(vt,posePts,cr); // 생략은 '미검출'이 아님
   var lmLast=s.lm.last, frameMotion=(lmLast&&lmLast.idx!=null&&lmLast.t===vt)?lmLast.idx:null;
+  if(landResp) s.lastLandWinT=vt; // 랜드마크로 창을 갱신한 마지막 시각(검증용: 직전 영역을 유지한 시간 계산)
   var rc=(respCropEnabled&&fr.window)?respCropFrame(s,srcEl,fr.window,fb.window||s.lastBodyWin||null,fr.roundDy):null;
   if(rc){ s.respCropK=rc.k; s.respCropFrames=(s.respCropFrames||0)+1; // 크롭 모드: 변위·카메라 수직 이동·창 좌표를 모두 크롭 px(k배)로 통일 — px 임계값(minAmplitudePx·shakeMinPx·trackedCamMaxRms)도 그 단위로 적용됨
     s.respA.pushFrame(rc.gray,vt,{window:rc.window,bodyBox:rc.bodyBox,camDy:cr.ok?cr.centerDy*rc.k:null,roundDy:rc.roundDy,breakContinuity:fr.breakContinuity,motion:frameMotion,bodyMoving:!!fr.moving,frameW:rc.w,frameH:rc.h}); }
   else if(respCropEnabled&&fr.window){ s.respCropMiss=(s.respCropMiss||0)+1; s.respA.pushFrame(gray,vt,{window:null,bodyBox:null,camDy:cr.ok?cr.centerDy:null,roundDy:0,breakContinuity:true,motion:frameMotion,bodyMoving:!!fr.moving}); } // 크롭 실패 프레임은 단위가 섞이지 않게 표본에서 제외(창 없음 처리)
   else s.respA.pushFrame(gray,vt,{window:fr.window,bodyBox:fb.window||s.lastBodyWin||null,camDy:cr.ok?cr.centerDy:null,roundDy:fr.roundDy,breakContinuity:fr.breakContinuity,motion:frameMotion,bodyMoving:!!fr.moving});
   s.appear.push(vt,blend,facePts);
+  var dec=s.respA.lastDecision||null; // 분석기의 프레임 판정(검증용): sample=표본 채택, 그 외 제외 사유
+  var rr=function(b){ return b?{x:+b.x.toFixed(1),y:+b.y.toFixed(1),w:+b.w.toFixed(1),h:+b.h.toFixed(1)}:null; };
   var rec={t:vt,trackStatus:fr.status,camOk:!!cr.ok,camDx:cr.ok?cr.centerDx:null,camDy:cr.ok?cr.centerDy:null,faceSrc:land.faceSrc||'none',faceN:(face&&face.faceLandmarks)?face.faceLandmarks.length:0,faceNRaw:faceNRaw,poseSkip:poseSkipped?1:0,poseN:poseSkipped?null:poseN,
-    respSrc:fr.window?(landResp?(landResp.fallback?'shoulder':'torso'):'carry'):'none',bodyMove:fr.bodyMove!=null?+fr.bodyMove.toFixed(2):null,moving:fr.moving?1:0}; // 호흡 창 출처: torso=어깨·골반 모두 보임, shoulder=골반 미검출(어깨 기준 추정), carry=이 프레임은 랜드마크 없이 이전 창 유지(coast)
+    respSrc:fr.window?(landResp?(landResp.fallback?'shoulder':'torso'):'carry'):'none',bodyMove:fr.bodyMove!=null?+fr.bodyMove.toFixed(2):null,moving:fr.moving?1:0, // 호흡 창 출처: torso=어깨·골반 모두 보임, shoulder=골반 미검출(어깨 기준 추정), carry=이 프레임은 랜드마크 없이 이전 창 유지(coast)
+    win:rr(fr.window),body:rr(fb.window||s.lastBodyWin),landWin:rr(landResp),carrySec:(fr.window&&!landResp&&s.lastLandWinT!=null)?+(vt-s.lastLandWinT).toFixed(2):(fr.window?0:null),
+    excl:dec?(dec.code==='sample'?null:dec.code):null,gapBefore:(dec&&dec.gapBreak)?1:0,cropWin:rc?rr(rc.window):null,cropK:rc?rc.k:null}; // 검증용: 분석 창(분석 해상도 px)·몸 상자·랜드마크 원시 창·직전 창 유지 시간·제외 사유·크롭 창(크롭 px)
   var skinOut=s.skin.push(subjectRejected?{faceLandmarks:[]}:faceOne,srcEl,vt,(land.faceSrc==='pose'&&!subjectRejected)?{src:'pose',lip:land.rois.lip,cheek:land.rois.cheek,cheekAlt:land.rois.cheekAlt,aw:AW,ah:AH}:null,{mouthOpen:!!(blend&&Number.isFinite(blend.jawOpen)&&blend.jawOpen>0.3),reasonOverride:subjectRejected?(land.subjectMatch==='rejected'?'subject-mismatch':'multiple-faces'):null});
   ['lip','cheek'].forEach(function(k){var x=skinOut[k];rec[k]=x.reason?{reason:x.reason,segment:s.sites[k].agg.finish().segment,clipRatio:x.stats&&x.stats.clipRatio,meanY:x.stats&&x.stats.meanY}:x.stats;});
   exposureAdapt(s,vt);
@@ -3255,10 +3297,11 @@ function pushTracked(s,gray,vt,srcEl){
   function skinBox(k){var p=skinOut[k]&&skinOut[k].patch;if(!p)return null;var b=p.bounds;return {x:b.x*AW,y:b.y*AH,w:b.w*AW,h:b.h*AH,polygon:p.points.map(function(p){return {x:p.x*AW,y:p.y*AH};})};}
   s.lastBoxes={resp:fr.window,respStatus:fr.status,respFallback:!!(landResp&&landResp.fallback),body:fb.window,lip:skinBox('lip'),cheek:skinBox('cheek'),face:!!facePts,faceSrc:land.faceSrc,pose:!!posePts,cam:cr};
   renderSkinLive(s,false);
-  var cost=performance.now()-t0;
+  var cost=performance.now()-t0; rec.procMs=Math.round(cost);
   s.skipPose = (coreMs>110) && !s.skipPose; // 기본 추론(얼굴+자세)만 110ms 넘을 때 다음 표본의 자세 모델 생략(교대) — 크롭·진단 시간은 포함하지 않음
   s.diag={lastMs:Math.round(cost),coreMs:Math.round(coreMs),skipPose:s.skipPose,mpErrors:s.mpErrors,lastMpError:s.lastMpError||null,faceEngine:s.faceEngine,faceEngineSwitch:s.faceEngineSwitch||null,probes:(s.probes||[]).length,probeEngineErrors:s.probeEngineErrors||null,cropTries:s.cropTries||0,cropHits:s.cropHits||0,cropMiss:s.cropMiss||0,gapCount:s.gapCount||0,camPts:cr.pts||0,camInliers:cr.inliers||0,camReason:cr.ok?null:cr.reason,respWindow:fr.status,respWindowRect:fr.window||null,poseEngine:poseCfgKey(s.poseCfg),poseSwitch:s.poseSwitch?{t:s.poseSwitch.t,from:s.poseSwitch.from,to:s.poseSwitch.to}:null,poseProbes:(s.poseProbes||[]).length,notes:land.notes,delegate:s.models&&s.models.delegate};
   drawLive(s);
+  try{ reviewCapture(s,rec); }catch(e){ s.reviewCaptureError=String(e&&e.message||e); }
 }
 function drawLive(s){
   var lv=$('liveView'); if(lv.hidden) return;
@@ -3508,9 +3551,9 @@ async function runTrackedFile(){
       if(k%5===0){$('prog').value=100*k/total;$('progText').textContent='자동 추적 분석 '+t.toFixed(1)+' / '+t1.toFixed(1)+'초';}
       if(k>0&&k%30===0) publishMeasurement(s,false);
     }
-    if(cancelFlag)$('progText').textContent='분석을 취소했습니다.';
+    if(cancelFlag){$('progText').textContent='분석을 취소했습니다.'; try{ attemptAbort(s,'aborted','사용자 취소'); }catch(_){ }}
     else {publishMeasurement(s,true);$('prog').value=100;$('progText').textContent='분석 완료';demoBanner('분석 완료 — 삼각형과 아래 상세 결과를 확인하세요.');}
-  }catch(e){fatal(e.message);demoBanner('분석 오류: '+e.message,true);}
+  }catch(e){fatal(e.message);demoBanner('분석 오류: '+e.message,true); try{ attemptAbort(s,'error',e.message); }catch(_){ }}
   finally{running=false;sourceButtons(false);$('btnCancel').hidden=true;$('btnAgain').hidden=false;updateRoiInfo();}
 }
 function pushMeasurement(s,gray,t,srcEl){
@@ -3570,14 +3613,18 @@ function publishMeasurement(s,final){
   if(s.mode==='camera'&&cameraDiag&&stream)liveMeta.cameraSettings=window.PATCAMDIAG.read(stream.getVideoTracks()[0]);
   if(s.tracked){ liveMeta.faceProbes=(s.probes||[]).map(function(p){return {t:p.t,results:p.results};}); liveMeta.faceEngine=s.faceEngine||null; liveMeta.faceEngineSwitch=s.faceEngineSwitch||null; liveMeta.faceEngineSwitches=s.faceEngineSwitches||[]; liveMeta.exposureSteps=s.exposureSteps||[]; liveMeta.exposureSupported=s.exposureSupported!=null?s.exposureSupported:null;
     liveMeta.frame=s.frame||null; liveMeta.respCrop={enabled:!!respCropEnabled,scale:s.respCropK||null,frames:s.respCropFrames||0,missed:s.respCropMiss||0,note:s.respCropK?'호흡 신호는 창 주변을 원본에서 '+s.respCropK.toFixed(1)+'배로 잘라 계산 — 변위·카메라 이동·px 임계값 모두 크롭 px 단위':'분석 해상도에서 계산'}; liveMeta.poseEngine={engine:s.poseCfg?poseCfgKey(s.poseCfg):null,fromMemory:!!s.poseCfgFromMemory,switched:s.poseSwitch?{t:s.poseSwitch.t,from:s.poseSwitch.from,to:s.poseSwitch.to}:null,switches:s.poseSwitches||[],probes:(s.poseProbes||[]).map(function(p){return {t:p.t,current:p.current,results:p.results};}),probeErrors:s.poseProbeErrors||null}; }
-  lastRun={respRes:respRes,motionRes:motionRes,colorRes:colorRes,appearRes:appearRes,sites:s.sites,records:s.records,meta:liveMeta};
+  if(respRes&&respRes.status==='ok'&&s.firstEstimateSec==null) s.firstEstimateSec=+elapsed.toFixed(1); // 첫 호흡수 추정이 나온 시각(검증용)
+  liveMeta.appVersion=APP_VERSION; liveMeta.firstEstimateSec=s.firstEstimateSec!=null?s.firstEstimateSec:null;
+  lastRun={respRes:respRes,motionRes:motionRes,colorRes:colorRes,appearRes:appearRes,sites:s.sites,records:s.records,meta:liveMeta,review:{thumbs:s.rvThumbs||[],startT:s.startT,mode:s.mode,tracked:!!s.tracked,annotations:(lastRun&&lastRun.review&&lastRun.review.annotations)||[],exportMs:null,captureError:s.reviewCaptureError||null},session:s};
   showResult(respRes);renderMotion(motionRes);renderColor(colorRes,s.sites);renderAppearance(appearRes);runInterpret();renderTriangle(lastRun);renderPatBoard(lastRun);if(s.skin)renderSkinLive(s,true);
+  if(final){ try{ attemptFinish(s,respRes,motionRes,elapsed,hz,procHz); }catch(e){} try{ reviewSetup(s,respRes); }catch(e){ $('reviewNote').textContent='검토 화면 오류: '+(e&&e.message||e); } }
   if(s.mode==='camera')$('liveStatus').textContent=(final?'측정 결과':'실시간 관찰 중 · 중간 추정')+' · '+elapsed.toFixed(1)+'초 · 실제 분석 '+hz.toFixed(1)+'프레임/초. '+(elapsed<60?'1분 참고 기준 비교는 아직 보류됩니다.':'');
 }
 function startLive(){
   if(cameraDiagBusy)return;
   if(!stream||running||autoBusy)return;
   running=true;cancelFlag=false;liveSession=makeMeasurement('camera');lastLiveSample=-Infinity;lastLivePaint=-Infinity;
+  try{ recorderStart(liveSession); }catch(e){ liveSession.recError=String(e&&e.message||e); }
   exposureRestore().then(function(){ exposureCtl.steps=[]; exposureCtl.lastT=-Infinity; exposureCtl.session=(exposureCtl.session||0)+1; }); // 같은 카메라의 새 측정: 세션별 제어 상태 초기화(원래 값으로 복원 후)
   clearResults();sourceButtons(true);$('btnRun').disabled=true;$('btnAgain').hidden=true;$('btnCancel').hidden=false;$('btnCancel').textContent='측정 종료';
   $('progWrap').hidden=false;$('prog').value=0;$('progText').textContent='첫 프레임 대기 중';
@@ -3586,7 +3633,9 @@ function startLive(){
 function finishLive(reason){
   var s=liveSession;if(!s)return;liveSession=null;
   exposureRestore();
-  try{publishMeasurement(s,true);}catch(e){fatal(e.message);}finally{if(s.cv)s.cv.dispose();}
+  s.endedBy=(s.lastT!=null&&(s.lastT-s.startT)<(s.targetSec||60.1)-0.5)?'user':'target'; // 검증용: 목표 시간 전에 사용자가 종료했는지
+  try{ recorderStop(s); }catch(e){}
+  try{publishMeasurement(s,true);}catch(e){fatal(e.message); try{ attemptAbort(s,'error',e.message); }catch(_){ }}finally{if(s.cv)s.cv.dispose();}
   running=false;sourceButtons(false);$('btnCancel').hidden=true;$('btnAgain').hidden=true;updateRoiInfo();
   $('progText').textContent=reason||'측정 종료';
   if(reason)$('liveStatus').textContent+=' '+reason;
@@ -3594,7 +3643,9 @@ function finishLive(reason){
 function clearResults(){
   $('skinLive').hidden=true; if($('patBoard'))$('patBoard').hidden=true; patObs={appearance:'unknown',breathing:'unknown',circulation:'unknown',impression:''};
   lastRun=null;lastResult=null;lastCsv='';liveMeta=null;
-  ['stepResult','stepRespInt','stepMotion','stepAppear','stepColor','stepInterp','stepCsv'].forEach(function(id){$(id).hidden=true;});
+  ['stepResult','stepRespInt','stepMotion','stepAppear','stepColor','stepInterp','stepCsv','stepReview'].forEach(function(id){$(id).hidden=true;});
+  try{ reviewStop(); }catch(e){}
+  $('btnThumbs').disabled=true;
 }
 async function runAnalysis(){
   if(running||autoBusy||preparing||!Object.keys(rois).some(roiValid))return;
@@ -3620,9 +3671,9 @@ async function runAnalysis(){
       wctx.drawImage(video,0,0,AW,AH);pushMeasurement(s,toGray(wctx.getImageData(0,0,AW,AH)),video.currentTime);
       if(k%5===0){$('prog').value=100*k/total;$('progText').textContent='파일 분석 '+t.toFixed(1)+' / '+t1.toFixed(1)+'초';}
     }
-    if(cancelFlag)$('progText').textContent='분석을 취소했습니다.';
+    if(cancelFlag){$('progText').textContent='분석을 취소했습니다.'; try{ attemptAbort(s,'aborted','사용자 취소'); }catch(_){ }}
     else {publishMeasurement(s,true);$('prog').value=100;$('progText').textContent='파일 분석 완료';}
-  }catch(e){fatal(e.message);}
+  }catch(e){fatal(e.message); try{ attemptAbort(s,'error',e.message); }catch(_){ }}
   finally{if(s.cv)s.cv.dispose();running=false;sourceButtons(false);$('btnCancel').hidden=true;$('btnAgain').hidden=false;updateRoiInfo();}
 }
 
@@ -4039,7 +4090,13 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
   (function(){ var c={mp:0,'mp-crop':0,pose:0,none:0,mismatch:0,poseSkipped:0}; records.forEach(function(r){ if(r.faceSrc) c[r.faceSrc]=(c[r.faceSrc]||0)+1; if(r.poseSkip) c.poseSkipped++; }); if(records.length) lines.push('# face_src(프레임 수; mp=얼굴 모델 전체 프레임, mp-crop=자세 모델이 가리킨 얼굴 영역을 잘라 재검출, pose=자세 모델 대체(품질 낮음), none=미검출; poseSkipped=과부하로 자세 추론 생략): '+JSON.stringify(c)); })();
   if(lastRun&&lastRun.meta&&lastRun.meta.poseEngine){ var pe=lastRun.meta.poseEngine, pc={found:0,none:0,multi:0,skipped:0}; records.forEach(function(r){ if(r.poseN==null){ if(r.poseSkip) pc.skipped++; return; } if(r.poseN===1) pc.found++; else if(r.poseN>1) pc.multi++; else pc.none++; });
     lines.push('# pose_engine(자세 모델 엔진/입력; video=영상 요소 직접, canvas=2D 캔버스 사본; 자가 진단은 얼굴은 보이는데 자세 0명일 때만 실행; fromMemory=지난 측정에서 성공한 조합으로 시작): '+JSON.stringify({engine:pe.engine,fromMemory:!!pe.fromMemory,switched:pe.switched,switches:pe.switches,poseFrames:pc,probes:pe.probes,probeErrors:pe.probeErrors})); }
-  lines.push('t_s,resp_disp_px,motion_idx_pct_s,motion_valid_ratio,motion_bg_ok,cam_idx_pct_s,motion_reason,lip_L,lip_a,lip_b,lip_reason,cheek_L,cheek_a,cheek_b,cheek_reason,lip_cheek_dE_aux,track_status,cam_ok,cam_dx_px,cam_dy_px,eye_open,gaze_off,jaw_open,lip_region,lip_segment,lip_pixels,cheek_region,cheek_segment,cheek_pixels,face_src,face_n,pose_skip,face_n_raw,lip_clip,lip_meanY,cheek_clip,cheek_meanY,resp_div_px,pose_n,resp_disp_all_px,resp_win_src,body_move_1s_px,body_moving');
+  lines.push('# app_version: '+APP_VERSION);
+  if(lastRun&&lastRun.meta&&lastRun.meta.frame){ var fr0=lastRun.meta.frame; lines.push('# frame_ref(좌표 기준): '+JSON.stringify({coords:'분석 해상도 px (resp_win_*, body_*, land_win_*)',AW:fr0.AW,AH:fr0.AH,srcW:fr0.srcW,srcH:fr0.srcH,scaleToSrc:(fr0.srcW&&fr0.AW)?+(fr0.srcW/fr0.AW).toFixed(3):null,cropCoords:'resp_crop_* 는 크롭 px(원본 해상도에서 crop_k배 영역)',timeBase:lastRun.meta.mode==='file'?'t_s = 영상 currentTime − 첫 분석 프레임 시각':'t_s = 카메라 스트림 경과초(첫 분석 프레임 기준)'})); }
+  if(respRes&&respRes.tracked) lines.push('# ranges_used(각 단계가 쓴 시간 범위): '+JSON.stringify({qualityChecks:'analysis',rateReported:'analysis',boardAndSummary:'analysis',csvRateT0T1:'analysis',peakInterval:'peakSpan(analysis 안)',recording:'recording',values:respRes.ranges||null}));
+  if(lastRun&&lastRun.meta){ var tm={measuredHz:lastRun.meta.measuredHz!=null?+lastRun.meta.measuredHz.toFixed(2):null,measuredHzNote:'분석 표본 수 / 영상 시간(초)',procHz:lastRun.meta.procHz!=null?lastRun.meta.procHz:null,procHzNote:'분석 표본 수 / 실제 경과(벽시계) 초 — 파일 모드에서는 실시간과 다름',firstEstimateSec:lastRun.meta.firstEstimateSec!=null?lastRun.meta.firstEstimateSec:null}; var pm=records.map(function(r){ return r.procMs; }).filter(function(v){ return v!=null; }); if(pm.length){ tm.meanProcMs=Math.round(pm.reduce(function(a,b){return a+b;},0)/pm.length); tm.maxProcMs=Math.max.apply(null,pm); } if(lastRun.review&&lastRun.review.exportMs!=null) tm.exportMs=lastRun.review.exportMs; lines.push('# timing: '+JSON.stringify(tm)); }
+  if(lastRun&&lastRun.review&&lastRun.review.tracked){ var rvv=lastRun.review; lines.push('# review(검증용 기록): '+JSON.stringify({thumbs:(rvv.thumbs||[]).length,transitions:(rvv.thumbs||[]).filter(function(x){ return !x.periodic; }).length,exportMs:rvv.exportMs,captureError:rvv.captureError||null,exclSegments:(rv&&rv.segs||[]).map(function(x){ return {t0:+x.t0.toFixed(1),t1:+x.t1.toFixed(1),code:x.code,n:x.n,meanBodyMove:x.meanBodyMove!=null?+x.meanBodyMove.toFixed(2):null,landJitterY:x.landJitterY!=null?+x.landJitterY.toFixed(2):null,meanMotionIdx:x.meanMotionIdx!=null?+x.meanMotionIdx.toFixed(1):null,meanCamIdx:x.meanCamIdx!=null?+x.meanCamIdx.toFixed(1):null,camOkRatio:x.camOkRatio!=null?+x.camOkRatio.toFixed(2):null}; })})); if(rvv.annotations&&rvv.annotations.length) lines.push('# review_annotations(사람이 영상을 보고 표시 — 실제 몸 이동 여부·창의 흉복부 이탈 여부): '+JSON.stringify(rvv.annotations)); }
+  try{ if(lastRun&&lastRun.session&&lastRun.session.attemptId){ var at=attemptLoad().filter(function(e){ return e.id===lastRun.session.attemptId; })[0]; if(at) lines.push('# attempt(시도 로그 항목): '+JSON.stringify(at)); } }catch(e){}
+  lines.push('t_s,resp_disp_px,motion_idx_pct_s,motion_valid_ratio,motion_bg_ok,cam_idx_pct_s,motion_reason,lip_L,lip_a,lip_b,lip_reason,cheek_L,cheek_a,cheek_b,cheek_reason,lip_cheek_dE_aux,track_status,cam_ok,cam_dx_px,cam_dy_px,eye_open,gaze_off,jaw_open,lip_region,lip_segment,lip_pixels,cheek_region,cheek_segment,cheek_pixels,face_src,face_n,pose_skip,face_n_raw,lip_clip,lip_meanY,cheek_clip,cheek_meanY,resp_div_px,pose_n,resp_disp_all_px,resp_win_src,body_move_1s_px,body_moving,resp_win_x,resp_win_y,resp_win_w,resp_win_h,body_x,body_y,body_w,body_h,land_win_y,land_win_h,win_carry_s,resp_excl,gap_before,proc_ms,resp_crop_x,resp_crop_y,resp_crop_w,resp_crop_h,crop_k');
   var apAt=new Map(ap&&ap.series?ap.series.map(function(v){return [v.t.toFixed(6),v];}):[]);
   if(lastRun && lastRun.meta)lines.splice(1,0,'# capture: '+JSON.stringify(lastRun.meta));
   var raw = respRes && respRes.raw;
@@ -4070,7 +4127,9 @@ function buildCsv(respRes, motionRes, colorRes, records, interp, ctx){
       csvNum(divAt.get(rec.t.toFixed(6)), 3),
       rec.poseN!=null?rec.poseN:'',
       csvNum(allAt.get(rec.t.toFixed(6)), 3),
-      rec.respSrc||'', rec.bodyMove!=null?rec.bodyMove:'', rec.moving!=null?rec.moving:''
+      rec.respSrc||'', rec.bodyMove!=null?rec.bodyMove:'', rec.moving!=null?rec.moving:'',
+      rec.win?rec.win.x:'', rec.win?rec.win.y:'', rec.win?rec.win.w:'', rec.win?rec.win.h:'', rec.body?rec.body.x:'', rec.body?rec.body.y:'', rec.body?rec.body.w:'', rec.body?rec.body.h:'', rec.landWin?rec.landWin.y:'', rec.landWin?rec.landWin.h:'',
+      rec.carrySec!=null?rec.carrySec:'', rec.excl||'', rec.gapBefore!=null?rec.gapBefore:'', rec.procMs!=null?rec.procMs:'', rec.cropWin?rec.cropWin.x:'', rec.cropWin?rec.cropWin.y:'', rec.cropWin?rec.cropWin.w:'', rec.cropWin?rec.cropWin.h:'', rec.cropK!=null?rec.cropK:''
     ].join(','));
   }
   lastCsv = lines.join('\n');
@@ -4106,10 +4165,200 @@ $('btnCsvDl').addEventListener('click', function(){
   } catch(e){ $('csvNote').textContent = '다운로드 불가 — 복사를 사용하세요'; }
 });
 
+/* ---------- 검증용 기록(v12.19): 시도 로그 · 촬영 영상 저장 · 프레임 판정 기록 · 검토용 그림 · 제외 구간 재생·표시 ----------
+   측정 로직·임계값과 무관한 기록 기능. 모든 자료는 이 기기 안(메모리·localStorage·다운로드)에만 남고 전송되지 않는다. */
+var APP_VERSION='v12.19';
+var ATTEMPT_KEY='pat_attempt_log_v1', ATTEMPT_MAX=200;
+function attemptLoad(){ try{ var v=JSON.parse(localStorage.getItem(ATTEMPT_KEY)||'[]'); return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function attemptSave(list){ try{ localStorage.setItem(ATTEMPT_KEY,JSON.stringify(list.slice(-ATTEMPT_MAX))); }catch(e){} }
+function attemptStart(s){
+  var e={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),startedAt:new Date().toISOString(),version:APP_VERSION,mode:s.mode,tracked:!!s.tracked,crop:!!respCropEnabled,targetSec:s.targetSec||null,
+    recordVideo:!!(s.mode==='camera'&&$('recChk')&&$('recChk').checked),status:'running',ua:(navigator.userAgent||'').slice(0,80)};
+  var L=attemptLoad(); L.push(e); attemptSave(L); s.attemptId=e.id; return e;
+}
+function attemptUpdate(s,patch){ if(!s||!s.attemptId) return; var L=attemptLoad(); for(var i=L.length-1;i>=0;i--){ if(L[i].id===s.attemptId){ Object.assign(L[i],patch); attemptSave(L); return; } } }
+function attemptAbort(s,status,why){ attemptUpdate(s,{status:status,reason:String(why||'').slice(0,120),endedAt:new Date().toISOString(),durationSec:(s&&s.lastT!=null&&s.startT!=null)?+(s.lastT-s.startT).toFixed(1):null}); }
+function attemptStats(s){ // 추적 비율·제외 분포(마네킹 대조 시험에서 '추적은 됐는데 숫자를 안 냈는가'를 구분하기 위한 값)
+  var R=s.records||[], n=R.length, pf=0,pn=0,ps=0, src={torso:0,shoulder:0,carry:0,none:0}, ex={}, mv=0, pm=[], camOk=0;
+  R.forEach(function(r){ if(r.poseN==null){ if(r.poseSkip) ps++; } else if(r.poseN>=1) pf++; else pn++; if(r.respSrc) src[r.respSrc]=(src[r.respSrc]||0)+1; if(r.excl) ex[r.excl]=(ex[r.excl]||0)+1; if(r.moving) mv++; if(r.procMs!=null) pm.push(r.procMs); if(r.camOk) camOk++; });
+  var mean=function(a){ return a.length?+(a.reduce(function(x,y){return x+y;},0)/a.length).toFixed(0):null; };
+  return {frames:n,poseFound:pf,poseNone:pn,poseSkipped:ps,poseFoundRatio:n?+(pf/Math.max(1,n-ps)).toFixed(2):null,winSrc:src,winTorsoRatio:n?+((src.torso+src.shoulder)/n).toFixed(2):null,exclCounts:ex,movingRatio:n?+(mv/n).toFixed(2):null,camOkRatio:n?+(camOk/n).toFixed(2):null,meanProcMs:mean(pm),maxProcMs:pm.length?Math.max.apply(null,pm):null};
+}
+function attemptFinish(s,respRes,motionRes,elapsed,hz,procHz){
+  var st=attemptStats(s);
+  attemptUpdate(s,{status:respRes?(respRes.status==='ok'?'ok':'unusable'):'no-resp',reason:respRes&&respRes.status!=='ok'?String(respRes.reason||'').slice(0,160):null,endedAt:new Date().toISOString(),endedBy:s.endedBy||null,
+    durationSec:+elapsed.toFixed(1),bpm:respRes&&respRes.status==='ok'?+respRes.bpm.toFixed(1):null,rateMethod:respRes&&respRes.rateMethod||null,rateT0:respRes&&respRes.rateT0!=null?+respRes.rateT0.toFixed(1):null,rateT1:respRes&&respRes.rateT1!=null?+respRes.rateT1.toFixed(1):null,
+    breathsN:respRes&&respRes.breaths?respRes.breaths.n:null,firstEstimateSec:s.firstEstimateSec!=null?s.firstEstimateSec:null,motionMean:motionRes&&motionRes.status==='ok'?+motionRes.meanIdx.toFixed(1):null,
+    measuredHz:+hz.toFixed(2),procHz:procHz!=null?+procHz.toFixed(2):null,stats:st,thumbs:(s.rvThumbs||[]).length,faceEngine:s.faceEngine||null,poseEngine:s.poseCfg?poseCfgKey(s.poseCfg):null,recorded:!!(s.recBlob),recBytes:s.recBlob?s.recBlob.size:null,recError:s.recError||null});
+}
+(function(){ var L=attemptLoad(), ch=false; L.forEach(function(e){ if(e.status==='running'){ e.status='interrupted'; e.endedAt=null; ch=true; } }); if(ch) attemptSave(L); })(); // 지난 세션이 끝나지 않은 채 닫힘
+function attemptCsv(){
+  var L=attemptLoad(); if(!L.length) return '';
+  var flat=L.map(function(e){ var o={}; Object.keys(e).forEach(function(k){ if(k==='stats'&&e.stats){ Object.keys(e.stats).forEach(function(q){ o['stats_'+q]=typeof e.stats[q]==='object'?JSON.stringify(e.stats[q]):e.stats[q]; }); } else o[k]=e[k]; }); return o; });
+  var cols=[]; flat.forEach(function(o){ Object.keys(o).forEach(function(k){ if(cols.indexOf(k)<0) cols.push(k); }); });
+  var esc=function(v){ if(v==null) return ''; var t=String(v); return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t; };
+  return ['# PAT 시도 로그 — 이 기기에서 실행한 측정(성공·실패·중단·오류) 자동 기록, 검증용','# 결과 제공률 = status ok 수 / 전체; 각 행의 rateT0~rateT1 = 보고 호흡수의 분석 범위; firstEstimateSec = 첫 추정까지 영상 시간; stats_* = 추적·제외 비율',cols.join(',')].concat(flat.map(function(o){ return cols.map(function(c){ return esc(o[c]); }).join(','); })).join('\n');
+}
+function downloadText(name,text,mime){ var done=function(m){ $('verifyNote').textContent=m; }; if(window.__patTest&&window.__patTest.dlHook){ window.__patTest.dlHook(name,new Blob([text],{type:mime||'text/plain'})); done('(시험) '+name); return; }
+  if(dlCap){ dlCap.save({filename:name,data:text}).then(function(){ done('저장됨: '+name); },function(err){ done('저장 실패('+(err&&err.code||'?')+')'); }); return; }
+  try{ var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([text],{type:mime||'text/plain'})); a.download=name; document.body.appendChild(a); a.click(); a.remove(); done('다운로드 시도: '+name); }catch(e){ done('다운로드 불가'); } }
+function downloadBlob(name,blob){ if(window.__patTest&&window.__patTest.dlHook){ window.__patTest.dlHook(name,blob); $('verifyNote').textContent='(시험) '+name; return; } try{ var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ a.remove(); },2000); $('verifyNote').textContent='다운로드 시도: '+name+' ('+(blob.size/1048576).toFixed(1)+'MB)'; }catch(e){ $('verifyNote').textContent='다운로드 불가: '+(e&&e.message||e); } }
+$('btnAttemptCsv').addEventListener('click',function(){ var t=attemptCsv(); if(!t){ $('verifyNote').textContent='시도 로그 없음'; return; } downloadText('pat_attempts_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.csv',t,'text/csv'); });
+$('btnAttemptClear').addEventListener('click',function(){ if(!confirm('이 기기의 시도 로그를 모두 지웁니다. 계속할까요?')) return; try{ localStorage.removeItem(ATTEMPT_KEY); }catch(e){} $('verifyNote').textContent='시도 로그 지움'; });
+
+/* 카메라 촬영 영상 저장(선택, 기본 끔): MediaRecorder로 스트림을 그대로 기기 메모리에 담았다가 측정이 끝나면 .webm 다운로드. 업로드 없음. 검토 재생은 이 파일을 '녹화 영상으로 측정'에 넣어서. */
+var lastRecording=null;
+function recorderStart(s){
+  if(!(s.mode==='camera'&&$('recChk').checked&&stream&&window.MediaRecorder)) return;
+  var types=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4'], mt=null; for(var i=0;i<types.length;i++){ try{ if(MediaRecorder.isTypeSupported(types[i])){ mt=types[i]; break; } }catch(e){} }
+  var rec=new MediaRecorder(stream,mt?{mimeType:mt}:undefined); s.recChunks=[]; s.recMime=rec.mimeType||mt||'video/webm'; s.recStartWall=performance.now();
+  rec.ondataavailable=function(e){ if(e.data&&e.data.size) s.recChunks.push(e.data); };
+  rec.onerror=function(e){ s.recError=String(e&&e.error&&e.error.message||e); };
+  rec.start(1000); s.recorder=rec; $('btnRecDl').hidden=true;
+}
+function recorderStop(s){
+  var rec=s&&s.recorder; if(!rec) return;
+  var finalize=function(){ try{ s.recBlob=new Blob(s.recChunks||[],{type:s.recMime}); lastRecording={blob:s.recBlob,mime:s.recMime,startedAt:s.attemptId,durationSec:s.lastT!=null?s.lastT-s.startT:null}; $('btnRecDl').hidden=false; $('verifyNote').textContent='촬영 영상 '+(s.recBlob.size/1048576).toFixed(1)+'MB 준비됨 — [촬영 영상 저장]으로 내려받아 \'녹화 영상으로 측정\'에 넣으면 제외 구간을 영상 위에서 볼 수 있습니다.'; attemptUpdate(s,{recorded:true,recBytes:s.recBlob.size}); }catch(e){ s.recError=String(e&&e.message||e); } };
+  if(rec.state==='inactive'){ finalize(); return; }
+  rec.onstop=finalize; try{ rec.stop(); }catch(e){ s.recError=String(e&&e.message||e); finalize(); }
+}
+$('btnRecDl').addEventListener('click',function(){ if(!lastRecording) return; downloadBlob('pat_capture_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+(/mp4/.test(lastRecording.mime)?'.mp4':'.webm'),lastRecording.blob); });
+
+/* 검토용 그림: 분석 프레임(work 캔버스, AW×AH)에 창·상자·판정을 겹쳐 작은 JPEG로 보관. 2초마다 + 상태 전환 직전·직후. 최대 RV_MAX장(초과 시 주기 그림부터 버림). */
+var RV_MAX=160, RV_COLORS={sample:'#19c37d',moving:'#e5484d',excl:'#f5a524',none:'#9aa0a6'};
+function reviewCapture(s,rec){
+  if(!s.tracked) return;
+  if(!s.rvPrevCanvas){ s.rvPrevCanvas=document.createElement('canvas'); s.rvPrevCanvas.width=AW; s.rvPrevCanvas.height=AH; }
+  var prev=s.rvPrevRec, why=[];
+  // 창 출처 분류: 자세 추론을 한 프레임 걸러 생략하면 torso↔carry가 매 프레임 바뀌므로, 0.5초 넘게 이어진 '유지'만 전환으로 본다
+  if(rec.respSrc==='torso'||rec.respSrc==='shoulder') s.rvLastLandClass=rec.respSrc;
+  var srcClass=function(r){ if(!r||r.respSrc==='none'||!r.respSrc) return 'none'; if(r.respSrc==='carry') return (r.carrySec!=null&&r.carrySec>=0.5)?'carry':(s.rvLastLandClass||'torso'); return r.respSrc; };
+  if(prev){
+    if((rec.moving?1:0)!==(prev.moving?1:0)) why.push(rec.moving?'이동 판정 시작':'이동 판정 종료');
+    var sc=srcClass(rec), sp=srcClass(prev); if(sc!==sp) why.push('창 출처 '+sp+'→'+sc);
+    var lostNow=(rec.trackStatus==='none'||rec.trackStatus==='lost'), lostPrev=(prev.trackStatus==='none'||prev.trackStatus==='lost');
+    if(lostNow!==lostPrev) why.push(lostNow?'추적 상실':'추적 복귀');
+    if(rec.trackStatus==='reanchor'&&prev.trackStatus!=='reanchor') why.push('재고정');
+    if(rec.gapBefore) why.push('프레임 공백 뒤');
+  }
+  var periodic=(s.rvLastT==null||rec.t-s.rvLastT>=2);
+  if(why.length){ if(prev&&s.rvLastRec!==prev) rvPush(s,s.rvPrevCanvas,prev,'직전 ('+why.join('·')+')',false); rvPush(s,work,rec,why.join('·'),false); }
+  else if(periodic){ rvPush(s,work,rec,'2초 간격',true); }
+  s.rvPrevCanvas.getContext('2d').drawImage(work,0,0); s.rvPrevRec=rec;
+}
+function rvDrawOverlay(c,rec,scale,withText){
+  var k=scale||1, box=function(b,col,dash){ if(!b) return; c.save(); c.strokeStyle=col; c.lineWidth=2; if(dash) c.setLineDash([4,3]); c.strokeRect(b.x*k,b.y*k,b.w*k,b.h*k); c.restore(); };
+  box(rec.body,'#4c8dff',false); box(rec.landWin,'#ffd400',true);
+  var wc=rec.excl?(rec.excl==='moving'?RV_COLORS.moving:RV_COLORS.excl):RV_COLORS.sample; box(rec.win,wc,false);
+  if(withText){ c.font='11px sans-serif'; c.fillStyle='rgba(0,0,0,.6)'; c.fillRect(0,0,c.canvas.width,26); c.fillStyle='#fff';
+    c.fillText('t='+rec.t.toFixed(1)+'s '+(rec.trackStatus||'')+' src='+(rec.respSrc||'-')+(rec.carrySec?(' 유지'+rec.carrySec+'s'):'')+' '+(rec.excl?('제외:'+rec.excl):'표본'),3,11);
+    c.fillText('이동1s='+(rec.bodyMove!=null?rec.bodyMove:'-')+'px cam='+(rec.camOk?'✓('+(rec.camDx!=null?rec.camDx.toFixed(1):'')+','+(rec.camDy!=null?rec.camDy.toFixed(1):'')+')':'✗')+' pose='+(rec.poseN==null?'생략':rec.poseN)+' '+(rec.procMs!=null?rec.procMs+'ms':''),3,23); }
+}
+function rvPush(s,srcCanvas,rec,label,periodic){
+  var c=document.createElement('canvas'); c.width=AW; c.height=AH+16; var g=c.getContext('2d');
+  g.drawImage(srcCanvas,0,0); rvDrawOverlay(g,rec,1,true);
+  g.fillStyle='#111'; g.fillRect(0,AH,AW,16); g.fillStyle='#fff'; g.font='11px sans-serif'; g.fillText(label.slice(0,34),3,AH+12);
+  var url; try{ url=c.toDataURL('image/jpeg',0.72); }catch(e){ return; }
+  s.rvThumbs=s.rvThumbs||[]; s.rvThumbs.push({t:+rec.t.toFixed(2),label:label,url:url,periodic:!!periodic});
+  if(periodic) s.rvLastT=rec.t; s.rvLastRec=rec;
+  if(s.rvThumbs.length>RV_MAX){ var i=s.rvThumbs.findIndex(function(x){ return x.periodic; }); s.rvThumbs.splice(i>=0?i:0,1); }
+  $('btnThumbs').disabled=false;
+}
+function loadImg(url){ return new Promise(function(res,rej){ var im=new Image(); im.onload=function(){ res(im); }; im.onerror=rej; im.src=url; }); }
+async function exportThumbs(){
+  var rv=lastRun&&lastRun.review, th=rv&&rv.thumbs||[]; if(!th.length){ $('verifyNote').textContent='검토용 그림 없음'; return; }
+  var t0=performance.now(), per=40, cols=5, cw=AW, ch=AH+16, sheets=Math.ceil(th.length/per), base='pat_review_'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  for(var k=0;k<sheets;k++){
+    var part=th.slice(k*per,(k+1)*per), rows=Math.ceil(part.length/cols), c=document.createElement('canvas'); c.width=cols*cw; c.height=rows*ch+18; var g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height);
+    g.fillStyle='#000'; g.font='12px sans-serif'; g.fillText('PAT 검토용 그림 '+(k+1)+'/'+sheets+' · '+APP_VERSION+' · 분석 해상도 '+AW+'×'+AH+' · 실선=분석 창(초록 표본/빨강 이동 제외/주황 기타 제외) 점선=랜드마크 원시 창 파랑=몸 상자 · 측정값 아님',4,13);
+    for(var i=0;i<part.length;i++){ try{ var im=await loadImg(part[i].url); g.drawImage(im,(i%cols)*cw,18+Math.floor(i/cols)*ch); }catch(e){} }
+    await new Promise(function(res){ c.toBlob(function(b){ if(b) downloadBlob(base+'_'+(k+1)+'.jpg',b); res(); },'image/jpeg',0.82); }); // JPEG: 같은 판을 PNG로 만들면 6MB, JPEG는 수백 KB
+  }
+  rv.exportMs=Math.round(performance.now()-t0); $('verifyNote').textContent='검토용 그림 '+th.length+'장 → JPG '+sheets+'개 ('+rv.exportMs+'ms)'; try{ attemptUpdate(lastRun.session,{exportMs:rv.exportMs}); }catch(e){}
+  try{ if(lastRun.interp) buildCsv(lastRun.respRes,lastRun.motionRes,lastRun.colorRes,lastRun.records,lastRun.interp,lastRun.interp.context); }catch(e){}
+}
+$('btnThumbs').addEventListener('click',function(){ exportThumbs(); });
+
+/* 제외 구간 표·시간축·재생기 */
+var rv={segs:[],playing:false,raf:null,dur:0,startT:0,recIdx:null};
+var EXCL_KO={moving:'몸 이동 중','no-window':'창 없음(자세 미검출·소실)','out-of-frame':'창이 프레임 밖','low-texture':'변위 특정 불가(질감)','win-jump':'창 크기 급변',reanchor:'재고정',first:'구간 첫 프레임(비교 쌍 없음)','hard-error':'오류'};
+function reviewSegments(records){
+  var segs=[], cur=null;
+  records.forEach(function(r,i){ var code=r.excl||null; if(code==='first') code=null; // 구간 첫 프레임은 제외가 아니라 경계
+    if(code&&cur&&cur.code===code&&(r.t-cur.t1)<=0.6){ cur.t1=r.t; cur.idx.push(i); }
+    else if(code){ if(cur) segs.push(cur); cur={code:code,t0:r.t,t1:r.t,idx:[i]}; }
+    else { if(cur) segs.push(cur); cur=null; } });
+  if(cur) segs.push(cur);
+  var motionAt=new Map((lastRun&&lastRun.motionRes&&lastRun.motionRes.series)?lastRun.motionRes.series.map(function(v){ return [v.t.toFixed(6),v]; }):[]);
+  segs.forEach(function(sg){ var bm=[],ci=[],mi=[],ly=[],cam=0,src={}; sg.idx.forEach(function(i){ var r=records[i]; if(r.bodyMove!=null) bm.push(r.bodyMove); if(r.camOk) cam++; if(r.respSrc) src[r.respSrc]=(src[r.respSrc]||0)+1; if(r.landWin) ly.push(r.landWin.y); var m=motionAt.get(r.t.toFixed(6)); if(m){ if(m.camIdx!=null) ci.push(m.camIdx); if(m.idx!=null) mi.push(m.idx); } });
+    var mean=function(a){ return a.length?a.reduce(function(x,y){return x+y;},0)/a.length:null; }, sd=function(a){ if(a.length<2) return null; var m=mean(a), v=0; a.forEach(function(x){ v+=(x-m)*(x-m); }); return Math.sqrt(v/(a.length-1)); };
+    // 세 경우 구분용 지표: meanBodyMove=평활 창의 1초 이동(판정 근거) · landJitterY=랜드마크 원시 창 y의 표준편차(아이는 정지인데 랜드마크가 튀면 큼) · camIdx=카메라(배경) 움직임 지표 · camOkRatio=카메라 보정 가능 비율(낮으면 카메라 이동이 몸 이동으로 분류될 수 있음)
+    sg.n=sg.idx.length; sg.meanBodyMove=mean(bm); sg.camOkRatio=sg.n?cam/sg.n:null; sg.src=src; sg.landJitterY=sd(ly); sg.meanCamIdx=mean(ci); sg.meanMotionIdx=mean(mi); });
+  return segs;
+}
+function reviewSetup(s,respRes){
+  if(!s.tracked||!s.records.length) return;
+  var R=s.records; rv.segs=reviewSegments(R); rv.dur=R[R.length-1].t; rv.startT=s.startT||0; rv.recIdx=null;
+  $('stepReview').hidden=false;
+  var mSeg=rv.segs.filter(function(x){ return x.code==='moving'; }), exclN=R.filter(function(r){ return r.excl&&r.excl!=='first'; }).length;
+  $('reviewLegend').textContent='프레임 '+R.length+'개 중 제외 '+exclN+'개 · 제외 구간 '+rv.segs.length+'개(몸 이동 '+mSeg.length+'개). 시간축: 빨강=몸 이동, 회색=창 없음, 주황=기타 제외, 초록 띠=보고 호흡수의 분석 범위, 연두 띠=피크 범위. '+(s.mode==='file'?'시간축을 누르면 그 시각으로 이동합니다.':'카메라 측정은 영상이 없어 재생은 안 되고(검증용 기록에서 영상 저장을 켜면 가능) 검토용 그림으로 확인합니다.');
+  reviewDrawBar(respRes);
+  var tb=$('exclTable').querySelector('tbody'); tb.innerHTML='';
+  var ann=(lastRun&&lastRun.review&&lastRun.review.annotations)||[];
+  rv.segs.forEach(function(sg,i){ if(sg.t1-sg.t0<0.25&&sg.n<3) return; var a=ann[i]||{}; var tr=document.createElement('tr');
+    tr.innerHTML='<td><a href="#" data-i="'+i+'" class="rvSeek">'+sg.t0.toFixed(1)+'~'+sg.t1.toFixed(1)+'</a><br><small>'+(sg.t1-sg.t0).toFixed(1)+'초·'+sg.n+'프레임</small></td><td>'+(EXCL_KO[sg.code]||sg.code)+'</td>'+
+      '<td><small>이동1s '+(sg.meanBodyMove!=null?sg.meanBodyMove.toFixed(1)+'px':'-')+' · 원시창 흔들림 σ '+(sg.landJitterY!=null?sg.landJitterY.toFixed(1)+'px':'-')+' · 몸 지표 '+(sg.meanMotionIdx!=null?sg.meanMotionIdx.toFixed(0)+'%/s':'-')+' · 카메라 지표 '+(sg.meanCamIdx!=null?sg.meanCamIdx.toFixed(0)+'%/s':'-')+' · cam✓ '+(sg.camOkRatio!=null?Math.round(sg.camOkRatio*100)+'%':'-')+' · 창 '+Object.keys(sg.src).map(function(k){ return k+' '+sg.src[k]; }).join('/')+'</small></td>'+
+      '<td><select data-k="moved" data-i="'+i+'"><option value="">미표시</option><option value="yes">예</option><option value="no">아니오</option><option value="unsure">불명</option></select></td>'+
+      '<td><select data-k="offTorso" data-i="'+i+'"><option value="">미표시</option><option value="yes">예</option><option value="no">아니오</option><option value="unsure">불명</option></select></td>'+
+      '<td><input type="text" data-k="note" data-i="'+i+'" placeholder="메모" style="width:110px"></td>';
+    tb.appendChild(tr); tr.querySelectorAll('select,input').forEach(function(el){ if(a[el.dataset.k]) el.value=a[el.dataset.k]; }); });
+  tb.querySelectorAll('a.rvSeek').forEach(function(a){ a.addEventListener('click',function(ev){ ev.preventDefault(); var sg=rv.segs[+a.dataset.i]; if(sg) reviewSeek(sg.t0); }); });
+  $('exclTable').hidden=!rv.segs.length;
+  var canPlay=(s.mode==='file'&&objUrl&&sourceMode==='file');
+  $('reviewPlayerWrap').hidden=!canPlay;
+  if(canPlay){ var cv=$('reviewView'); cv.width=AW; cv.height=AH; $('rvSlider').max=1000; reviewSeek(0); }
+}
+function reviewDrawBar(respRes){
+  var cv=$('reviewBar'); var W=cv.clientWidth||600; cv.width=W; var H=cv.height, c=cv.getContext('2d'); c.clearRect(0,0,W,H); if(!rv.dur) return;
+  var X=function(t){ return Math.max(0,Math.min(W,t/rv.dur*W)); };
+  c.fillStyle='#e8e8e8'; c.fillRect(0,4,W,14);
+  rv.segs.forEach(function(sg){ c.fillStyle=sg.code==='moving'?RV_COLORS.moving:(sg.code==='no-window'||sg.code==='out-of-frame')?RV_COLORS.none:RV_COLORS.excl; c.fillRect(X(sg.t0),4,Math.max(1,X(sg.t1)-X(sg.t0)),14); });
+  if(respRes&&respRes.status==='ok'&&respRes.rateT0!=null){ c.fillStyle='#19c37d'; c.fillRect(X(respRes.rateT0),22,Math.max(1,X(respRes.rateT1)-X(respRes.rateT0)),8); if(respRes.breaths){ c.fillStyle='#9be3c3'; c.fillRect(X(respRes.breaths.t0),31,Math.max(1,X(respRes.breaths.t1)-X(respRes.breaths.t0)),4); } }
+  c.fillStyle='#333'; c.font='10px sans-serif'; for(var t=0;t<=rv.dur;t+=10){ c.fillRect(X(t),18,1,3); c.fillText(t+'s',X(t)+2,38); }
+  if(rv.recIdx!=null&&lastRun&&lastRun.records[rv.recIdx]){ c.fillStyle='#000'; c.fillRect(X(lastRun.records[rv.recIdx].t)-1,2,2,18); }
+}
+$('reviewBar').addEventListener('click',function(ev){ if(!rv.dur||$('reviewPlayerWrap').hidden) return; var r=ev.target.getBoundingClientRect(); reviewSeek((ev.clientX-r.left)/r.width*rv.dur); });
+function reviewRecAt(t){ var R=lastRun&&lastRun.records; if(!R||!R.length) return null; var lo=0,hi=R.length-1; while(lo<hi){ var mid=(lo+hi)>>1; if(R[mid].t<t) lo=mid+1; else hi=mid; } if(lo>0&&Math.abs(R[lo-1].t-t)<Math.abs(R[lo].t-t)) lo--; return lo; }
+function reviewDrawFrame(){
+  var cv=$('reviewView'), c=cv.getContext('2d'); try{ c.drawImage(video,0,0,cv.width,cv.height); }catch(e){}
+  var vt=video.currentTime-rv.startT, i=reviewRecAt(vt); rv.recIdx=i; var rec=i!=null?lastRun.records[i]:null;
+  if(rec&&Math.abs(rec.t-vt)<0.25){ rvDrawOverlay(c,rec,cv.width/AW,false); $('rvInfo').textContent='t='+rec.t.toFixed(1)+'초 · '+(rec.excl?('제외: '+(EXCL_KO[rec.excl]||rec.excl)):'표본 채택')+' · 추적 '+rec.trackStatus+' · 창 출처 '+rec.respSrc+(rec.carrySec?(' (유지 '+rec.carrySec+'초)'):'')+' · 1초 이동 '+(rec.bodyMove!=null?rec.bodyMove+'px':'-')+' · 카메라 보정 '+(rec.camOk?'✓':'✗')+' · 자세 '+(rec.poseN==null?'생략':rec.poseN)+(rec.procMs!=null?' · 처리 '+rec.procMs+'ms':''); }
+  else $('rvInfo').textContent='t='+vt.toFixed(1)+'초 · 이 시각의 분석 기록 없음';
+  $('rvSlider').value=Math.round(vt/Math.max(0.1,rv.dur)*1000); $('rvTime').textContent=vt.toFixed(1)+'초'; reviewDrawBar(lastRun&&lastRun.respRes);
+}
+function reviewSeek(vt){ reviewStop(); var t=Math.max(0,Math.min(video.duration||rv.dur,vt+rv.startT)); seekTo(t).then(reviewDrawFrame,reviewDrawFrame); }
+function reviewStop(){ rv.playing=false; if(rv.raf){ cancelAnimationFrame(rv.raf); rv.raf=null; } try{ if(!video.paused) video.pause(); }catch(e){} $('rvPlay').textContent='재생'; }
+function reviewPlay(){
+  if(running) return; rv.playing=true; $('rvPlay').textContent='일시정지'; video.muted=true; video.playbackRate=+$('rvSpeed').value||1;
+  var loop=function(){ if(!rv.playing) return; reviewDrawFrame(); if(video.ended||video.currentTime-rv.startT>=rv.dur){ reviewStop(); return; } rv.raf=requestAnimationFrame(loop); };
+  video.play().then(function(){ rv.raf=requestAnimationFrame(loop); },function(e){ reviewStop(); $('rvInfo').textContent='재생 불가: '+(e&&e.message||e); });
+}
+$('rvPlay').addEventListener('click',function(){ if(rv.playing) reviewStop(); else reviewPlay(); });
+$('rvSlider').addEventListener('input',function(){ reviewSeek(+$('rvSlider').value/1000*rv.dur); });
+$('rvNext').addEventListener('click',function(){ var vt=video.currentTime-rv.startT, sg=rv.segs.find(function(x){ return x.t0>vt+0.05; }); if(sg) reviewSeek(sg.t0); });
+$('rvPrev').addEventListener('click',function(){ var vt=video.currentTime-rv.startT, prev=null; rv.segs.forEach(function(x){ if(x.t0<vt-0.05) prev=x; }); if(prev) reviewSeek(prev.t0); });
+$('btnReviewApply').addEventListener('click',function(){
+  if(!lastRun||!lastRun.review) return; var ann=[]; $('exclTable').querySelectorAll('select,input').forEach(function(el){ var i=+el.dataset.i; ann[i]=ann[i]||{t0:rv.segs[i].t0,t1:rv.segs[i].t1,code:rv.segs[i].code}; if(el.value) ann[i][el.dataset.k]=el.value; });
+  lastRun.review.annotations=ann.filter(function(a){ return a&&(a.moved||a.offTorso||a.note); });
+  try{ if(lastRun.interp) buildCsv(lastRun.respRes,lastRun.motionRes,lastRun.colorRes,lastRun.records,lastRun.interp,lastRun.interp.context); $('reviewNote').textContent='검토 표시 '+lastRun.review.annotations.length+'건을 CSV(# review_annotations)에 포함했습니다.'; }catch(e){ $('reviewNote').textContent='CSV 갱신 실패: '+(e&&e.message||e); }
+  try{ attemptUpdate(lastRun.session,{annotations:lastRun.review.annotations.length}); }catch(e){}
+});
+
 /* ---------- ⑥ 수동 계수 비교 ---------- */
 $('manual').addEventListener('input', updateManualDiff);
 function updateManualDiff(){
   var m = parseFloat($('manual').value);
+  try{ if(lastRun&&lastRun.session) attemptUpdate(lastRun.session,{manualBpm:isFinite(m)?m:null}); }catch(e){}
   if (lastRun && lastRun.interp && !updateManualDiff.rebuilding) { updateManualDiff.rebuilding = true; try { buildCsv(lastRun.respRes, lastRun.motionRes, lastRun.colorRes, lastRun.records, lastRun.interp, lastRun.interp.context); } catch(_){} updateManualDiff.rebuilding = false; } // 직접 센 값을 CSV 머리글에 포함
   var el = $('manualDiff');
   if (!lastResult || lastResult.status !== 'ok' || !isFinite(m)) { el.textContent = ''; return; }
@@ -4441,7 +4690,7 @@ $('btnSyn').addEventListener('click', async function(){
   btn.disabled = false; btn.textContent = '합성 시험 실행';
 });
 /* 시험 전용 훅(화면 동작과 무관): 자동화 시험이 측정 파이프라인을 직접 구동할 수 있게 함 */
-window.__patTest={setRespCrop:function(on){respCropEnabled=!!on;},makeMeasurement:makeMeasurement,pushMeasurement:pushMeasurement,publishMeasurement:publishMeasurement,setModels:function(m){models=m;},setTracked:function(v){trackedMode=!!v;},setSize:function(w,h){AW=w;AH=h;work.width=w;work.height=h;},getLastRun:function(){return lastRun;},getCsv:function(){return lastCsv;},setStream:function(st){stream=st;},setRun:function(r){lastRun=r;renderPatBoard(r);renderTriangle(r);},quality:function(r){return patQuality(r);},startLiveReset:function(){exposureCtl.steps=[];exposureCtl.lastT=-Infinity;exposureCtl.session=(exposureCtl.session||0)+1;},setObs:function(o){Object.assign(patObs,o);},runFaceProbe:function(){return runFaceProbeButton();},getDiagNote:function(){return cameraDiagNote;},lastCrop:function(){return liveSession&&liveSession.lastCrop||(window.__patLastSession&&window.__patLastSession.lastCrop)||null;},noteSession:function(s){window.__patLastSession=s;}};
+window.__patTest={setRespCrop:function(on){respCropEnabled=!!on;},reviewSeek:function(t){return reviewSeek(t);},exportThumbs:function(){return exportThumbs();},getReview:function(){return rv;},attemptLoad:attemptLoad,reviewSegments:reviewSegments,reviewSetup:reviewSetup,setLastRun:function(r){lastRun=r;},makeMeasurement:makeMeasurement,pushMeasurement:pushMeasurement,publishMeasurement:publishMeasurement,setModels:function(m){models=m;},setTracked:function(v){trackedMode=!!v;},setSize:function(w,h){AW=w;AH=h;work.width=w;work.height=h;},getLastRun:function(){return lastRun;},getCsv:function(){return lastCsv;},setStream:function(st){stream=st;},setRun:function(r){lastRun=r;renderPatBoard(r);renderTriangle(r);},quality:function(r){return patQuality(r);},startLiveReset:function(){exposureCtl.steps=[];exposureCtl.lastT=-Infinity;exposureCtl.session=(exposureCtl.session||0)+1;},setObs:function(o){Object.assign(patObs,o);},runFaceProbe:function(){return runFaceProbeButton();},getDiagNote:function(){return cameraDiagNote;},lastCrop:function(){return liveSession&&liveSession.lastCrop||(window.__patLastSession&&window.__patLastSession.lastCrop)||null;},noteSession:function(s){window.__patLastSession=s;}};
 })();
 /*__END__*/
 </script>
